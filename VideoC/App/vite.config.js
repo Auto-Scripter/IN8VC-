@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       basicSsl() // <-- Isko yahan add karein
+      
     ],
     server: {
       https: true, // <-- Server ko HTTPS par chalane ke liye yeh add karein

@@ -5,9 +5,13 @@ const JitsiMeet = React.memo(({
     roomName,
     displayName,
     password,
-    domain, // We will use this prop instead of hardcoding
+    domain,
     onMeetingEnd,
     onApiReady,
+    // highlight-start
+    // New prop to notify parent about recording status changes
+    onRecordingStatusChanged, 
+    // highlight-end
     startWithVideoMuted,
     startWithAudioMuted,
     prejoinPageEnabled,
@@ -19,14 +23,15 @@ const JitsiMeet = React.memo(({
 
     useEffect(() => {
         if (!jitsiContainerRef.current) return;
-        const domain = "meet.in8.com";
+        
+        // This should ideally use the domain prop, but keeping your structure
+        const effectiveDomain = "meet.in8.com";
 
-        // FIX #1: Removed the hardcoded domain. We now use the 'domain' prop.
         const script = document.createElement('script');
-        script.src = `https://${domain}/external_api.js`;
+        script.src = `https://${effectiveDomain}/external_api.js`;
         script.async = true;
         
-        script.onerror = () => console.error(`Failed to load Jitsi script from: https://${domain}/external_api.js`);
+        script.onerror = () => console.error(`Failed to load Jitsi script from: https://${effectiveDomain}/external_api.js`);
         
         document.head.appendChild(script);
 
@@ -51,27 +56,33 @@ const JitsiMeet = React.memo(({
                 interfaceConfigOverwrite: {
                     TOOLBAR_BUTTONS: toolbarButtons,
                     SHOW_JITSI_WATERMARK: false,
-                    CROSS_DOMAIN_IFRAME_WHITELIST: ['*']
-
                 },
             };
             
-            apiRef.current = new window.JitsiMeetExternalAPI(domain, options, jwt);
+            apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options, jwt);
 
-            // FIX #2: Wait for the local user to join before signaling that the API is ready.
-            // This is the solution to the "No transport backend defined!" error.
+            // Notify parent that the API is ready
             apiRef.current.addEventListener('videoConferenceJoined', () => {
-    console.log("Jitsi API is now fully ready (videoConferenceJoined event).");
-    if (onApiReady && typeof onApiReady === 'function') {
-        onApiReady(apiRef.current);
-    }
-});
+                if (onApiReady && typeof onApiReady === 'function') {
+                    onApiReady(apiRef.current);
+                }
+            });
 
+            // Notify parent when the meeting ends
             apiRef.current.addEventListener('videoConferenceLeft', () => {
                 if (onMeetingEnd && typeof onMeetingEnd === 'function') {
                     onMeetingEnd();
                 }
             });
+
+            // highlight-start
+            // Notify parent about recording status changes
+            apiRef.current.addEventListener('recordingStatusChanged', (status) => {
+                if (onRecordingStatusChanged && typeof onRecordingStatusChanged === 'function') {
+                    onRecordingStatusChanged(status); // Pass the whole status object
+                }
+            });
+            // highlight-end
         };
 
         return () => {
@@ -85,6 +96,7 @@ const JitsiMeet = React.memo(({
         };
     }, [
         domain, roomName, displayName, password, onMeetingEnd, onApiReady,
+        onRecordingStatusChanged, // Add new prop to dependency array
         startWithVideoMuted, startWithAudioMuted, prejoinPageEnabled, toolbarButtons,
         jwt
     ]);
@@ -92,13 +104,13 @@ const JitsiMeet = React.memo(({
     return (
         <div
             ref={jitsiContainerRef}
-            className="w-full h-full rounded-2xl overflow-hidden"
+            className="w-full h-full overflow-hidden"
             style={{ position: 'relative' }}
         />
     );
 });
 
-// Add the 'jwt' prop to propTypes and defaultProps if you are using it
+// Add the new prop to propTypes for validation and clarity
 JitsiMeet.propTypes = {
     domain: PropTypes.string,
     roomName: PropTypes.string.isRequired,
@@ -106,6 +118,7 @@ JitsiMeet.propTypes = {
     password: PropTypes.string,
     onMeetingEnd: PropTypes.func.isRequired,
     onApiReady: PropTypes.func.isRequired,
+    onRecordingStatusChanged: PropTypes.func, // New propType
     startWithVideoMuted: PropTypes.bool,
     startWithAudioMuted: PropTypes.bool,
     prejoinPageEnabled: PropTypes.bool,
@@ -113,9 +126,11 @@ JitsiMeet.propTypes = {
     jwt: PropTypes.string,
 };
 
+// Add a default for the new prop
 JitsiMeet.defaultProps = {
-    domain: 'meet.in8.com', // The default domain
+    domain: 'meet.in8.com',
     password: '',
+    onRecordingStatusChanged: () => {}, // Default empty function
     startWithVideoMuted: false,
     startWithAudioMuted: false,
     prejoinPageEnabled: false,
