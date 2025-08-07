@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+// NEW_MeetingSidebar.js
+
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, MessageSquare, Share2, PanelLeftClose, Radio, Copy, Check, Mail, Award, MicOff, UserX } from 'lucide-react';
 
-// --- Helper Components (No changes needed here) ---
+// --- Helper: Sidebar Navigation Button ---
 const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
     <button 
         onClick={onClick}
@@ -21,6 +23,7 @@ const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
     </button>
 );
 
+// --- Helper: Participants Panel ---
 const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
     const avatarColors = [
         'from-cyan-500 to-blue-600', 'from-emerald-500 to-green-600',
@@ -53,10 +56,9 @@ const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
                         </div>
                         <span className="text-slate-200 text-sm truncate flex-grow">{p.formattedDisplayName}</span>
                         
-                        {p.isLocal && isHost && <Award size={16} title="You are the host" className="text-amber-400 flex-shrink-0 ml-auto" />}
-
+                        {/* Admin controls: show for host, but not for themselves */}
                         {isHost && !p.isLocal && (
-                            <div className="ml-auto flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                                 <button onClick={() => onMute(p.participantId)} title="Mute Participant" className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-600 rounded-full">
                                     <MicOff size={14} />
                                 </button>
@@ -65,6 +67,8 @@ const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
                                 </button>
                             </div>
                         )}
+                        {/* Admin Badge: show for the user who is the host */}
+                        {p.isLocal && isHost && <Award size={16} title="You are the host" className="text-amber-400 flex-shrink-0 ml-auto" />}
                     </div>
                 ))}
             </div>
@@ -72,7 +76,11 @@ const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
     );
 };
 
-const SharePanel = ({ meetingLink, meetingCode, handleCopy, copiedItem }) => (
+// --- Helper: Share Panel ---
+const SharePanel = ({ meetingLink, handleCopy, copiedItem }) => {
+    const meetingCode = meetingLink ? meetingLink.substring(meetingLink.lastIndexOf('/') + 1) : '';
+
+    return (
     <motion.div 
         key="share-panel"
         initial={{ x: -20, opacity: 0 }}
@@ -109,11 +117,10 @@ const SharePanel = ({ meetingLink, meetingCode, handleCopy, copiedItem }) => (
             ><Mail size={16} /><span>Share via Email</span></a>
         </div>
     </motion.div>
-);
+    )
+};
 
-
-// --- Main MeetingSidebar Component ---
-const MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isStreaming, isHost }) => {
+const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, localDisplayName}) => {
     const [activePanel, setActivePanel] = useState('participants');
     const [copiedItem, setCopiedItem] = useState(null);
     const [participants, setParticipants] = useState([]);
@@ -122,73 +129,63 @@ const MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isStreaming,
     const tl = useRef();
 
     useGSAP(() => {
-        const q = gsap.utils.selector(sidebarRef);
-        const children = q(".sidebar-content > *");
-        tl.current = gsap.timeline({ paused: true });
-        tl.current
-            .to(sidebarRef.current, { width: '18rem', paddingLeft: '1rem', paddingRight: '1rem', duration: 0.5, ease: 'power3.inOut' })
-            .fromTo(children, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.3, stagger: 0.05, ease: 'power2.out' }, "-=0.3");
-    }, { scope: sidebarRef });
-
-    useGSAP(() => {
-        if (isOpen) tl.current.play(); 
-        else tl.current.reverse(); 
+        gsap.set(sidebarRef.current, { width: isOpen ? '18rem' : 0, padding: isOpen ? '0 1rem' : 0 });
+        if(isOpen) {
+             gsap.fromTo(sidebarRef.current.children, { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.4, stagger: 0.05, ease: 'power2.out', delay: 0.2 });
+        }
     }, { dependencies: [isOpen] });
     
-    useEffect(() => {
-        if (!jitsiApi) return;
+   const updateParticipantList = useCallback(() => {
+        if (!jitsiApi) {
+            return;
+        }
 
-        // highlight-start
-        // --- THIS IS THE NEW ROBUST LOGIC ---
-        const updateParticipantList = () => {
-            // Step 1: Create a Map to store unique participants. This is the best way to avoid duplicates.
-            const participantsMap = new Map();
-             
+        const allParticipants = jitsiApi.getParticipantsInfo();
+        let finalList = [];
 
-            // Step 2: Create your local participant object with fallbacks, so it always works.
-            const localParticipant = {
-                participantId: jitsiApi._myUserId || 'local-user', // Fallback ID
-                formattedDisplayName: (jitsiApi.getDisplayName() || 'Me').replace(/\s*\(me\)$/, '') + ' (You)',
-                isLocal: true
+        // Use the new localDisplayName prop to filter the list
+        if (isHost && localDisplayName) {
+            // Filter out any participant whose name matches the one passed in props
+            const otherParticipants = allParticipants
+                .filter(p => p.displayName !== localDisplayName)
+                .map(p => ({ ...p, isLocal: false }));
+
+            // Create the special "Admin" entry
+            const adminEntry = {
+                participantId: 'local-admin-host',
+                formattedDisplayName: 'Admin (You)',
+                isLocal: true,
             };
             
-            // Add your local profile to the map first.
-            participantsMap.set(localParticipant.participantId, localParticipant);
+            finalList = [adminEntry, ...otherParticipants];
+        } else {
+            // Fallback for non-hosts or if the name isn't available
+            finalList = allParticipants.map(p => ({ ...p }));
+        }
 
-            // Step 3: Get all other participants from the API.
-            const remoteParticipants = jitsiApi.getParticipantsInfo();
-            
-            // Step 4: Add the other participants to the map. If an ID already exists (like your local one), it won't be added again.
-            remoteParticipants.forEach(p => {
-                if (!participantsMap.has(p.participantId)) {
-                    participantsMap.set(p.participantId, { ...p, isLocal: false });
-                }
-            });
+        setParticipants(finalList);
+    }, [jitsiApi, isHost, localDisplayName]);// The function now depends on isHost
 
-            // Step 5: Convert the map back to an array and update the state.
-            const uniqueParticipants = Array.from(participantsMap.values());
-            setParticipants(uniqueParticipants);
-        };
-        // highlight-end
+   useEffect(() => {
+    if (!jitsiApi) {
+        return;
+    }
 
-        // Run the function once initially
-        updateParticipantList();
-        
-        // Set up event listeners to keep the list updated
-        const handleParticipantUpdate = () => setTimeout(updateParticipantList, 200);
-        
-        jitsiApi.addEventListener('participantJoined', handleParticipantUpdate);
-        jitsiApi.addEventListener('participantLeft', handleParticipantUpdate);
-        jitsiApi.addEventListener('displayNameChange', handleParticipantUpdate);
-        jitsiApi.addEventListener('videoConferenceJoined', handleParticipantUpdate);
+    // Call the update function once as soon as the API is ready.
+    updateParticipantList();
 
-        return () => {
-            jitsiApi.removeEventListener('participantJoined', handleParticipantUpdate);
-            jitsiApi.removeEventListener('participantLeft', handleParticipantUpdate);
-            jitsiApi.removeEventListener('displayNameChange', handleParticipantUpdate);
-            jitsiApi.removeEventListener('videoConferenceJoined', handleParticipantUpdate);
-        };
-    }, [jitsiApi]);
+    // Set up listeners to handle future changes (people joining/leaving).
+    jitsiApi.addEventListener('participantJoined', updateParticipantList);
+    jitsiApi.addEventListener('participantLeft', updateParticipantList);
+    jitsiApi.addEventListener('displayNameChange', updateParticipantList);
+
+    // Cleanup function
+    return () => {
+        jitsiApi.removeEventListener('participantJoined', updateParticipantList);
+        jitsiApi.removeEventListener('participantLeft', updateParticipantList);
+        jitsiApi.removeEventListener('displayNameChange', updateParticipantList);
+    };
+}, [jitsiApi, isHost, updateParticipantList]); // Dependencies
 
     const handleMuteParticipant = (participantId) => jitsiApi?.executeCommand('muteParticipant', participantId);
     const handleKickParticipant = (participantId) => {
@@ -197,85 +194,74 @@ const MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isStreaming,
         }
     };
     
-    const handleTogglePanel = (panelName, command) => {
-        if (command) {
-            if (activePanel !== 'chat' || panelName !== 'chat') {
-                 jitsiApi?.executeCommand(command);
-            }
-        } else {
-            if (activePanel === 'chat' && panelName !== 'chat') {
-                 jitsiApi?.executeCommand('toggleChat');
-            }
-        }
+    const handleTogglePanel = (panelName) => {
+        if (panelName === 'chat') jitsiApi?.executeCommand('toggleChat');
         setActivePanel(panelName);
     };
 
     const handleCopy = (text, type) => {
-        if (text && copiedItem !== type) {
-            navigator.clipboard.writeText(text).then(() => {
-                setCopiedItem(type);
-                setTimeout(() => setCopiedItem(null), 2500);
-            });
-        }
+        navigator.clipboard.writeText(text).then(() => {
+            setCopiedItem(type);
+            setTimeout(() => setCopiedItem(null), 2500);
+        });
     };
 
-    const meetingCode = meetingLink ? meetingLink.substring(meetingLink.lastIndexOf('/') + 1) : '';
-
     return (
-        <aside
+        <motion.aside
             ref={sidebarRef}
             className="h-screen bg-slate-900 border-r border-slate-800/70 overflow-hidden flex flex-col shadow-2xl"
-            style={{ width: 0, padding: 0 }}
+            initial={{ width: 0, padding: 0 }}
+            animate={{ width: isOpen ? '18rem' : 0, padding: isOpen ? '0 1rem' : 0 }}
+            transition={{ duration: 0.5, ease: 'circOut' }}
         >
-            <div className="sidebar-content flex flex-col h-full">
-                <div className="flex items-center justify-between py-4 mb-2 border-b border-slate-800 flex-shrink-0">
-                    <h2 className="text-lg font-bold text-white tracking-wide">Meeting Hub</h2>
-                    <button onClick={() => setIsOpen(false)} className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
-                        <PanelLeftClose size={20} />
-                    </button>
-                </div>
+            <div className="flex items-center justify-between py-4 mb-2 border-b border-slate-800 flex-shrink-0">
+                <h2 className="text-lg font-bold text-white tracking-wide">Meeting Hub</h2>
+                <button onClick={() => setIsOpen(false)} className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
+                    <PanelLeftClose size={20} />
+                </button>
+            </div>
 
-                <nav className="flex-shrink-0 space-y-1">
-                    <SidebarButton icon={Users} label="Participants" onClick={() => handleTogglePanel('participants')} isActive={activePanel === 'participants'} />
-                    <SidebarButton icon={MessageSquare} label="Chat" onClick={() => handleTogglePanel('chat', 'toggleChat')} isActive={activePanel === 'chat'}/>
-                    <SidebarButton icon={Share2} label="Share" onClick={() => handleTogglePanel('share')} isActive={activePanel === 'share'}/>
-                </nav>
-                
-                <hr className="border-slate-800 my-3" />
+            <nav className="flex-shrink-0 space-y-1">
+                <SidebarButton icon={Users} label="Participants" onClick={() => handleTogglePanel('participants')} isActive={activePanel === 'participants'} />
+                <SidebarButton icon={MessageSquare} label="Chat" onClick={() => handleTogglePanel('chat')} isActive={activePanel === 'chat'}/>
+                <SidebarButton icon={Share2} label="Share" onClick={() => handleTogglePanel('share')} isActive={activePanel === 'share'}/>
+            </nav>
+            
+            <hr className="border-slate-800 my-3" />
 
-                <div className="flex-grow overflow-hidden">
-                    <AnimatePresence mode="wait">
-                        {activePanel === 'participants' && (
-                            <ParticipantsPanel 
-                                participants={participants}
-                                isHost={isHost}
-                                onMute={handleMuteParticipant}
-                                onKick={handleKickParticipant}
-                            />
-                        )}
-                        {activePanel === 'share' && (
-                            <SharePanel 
-                                meetingLink={meetingLink} 
-                                meetingCode={meetingCode} 
-                                handleCopy={handleCopy} 
-                                copiedItem={copiedItem} 
-                            />
-                        )}
-                    </AnimatePresence>
-                </div>
+            <div className="flex-grow overflow-hidden">
+                <AnimatePresence mode="wait">
+                    {activePanel === 'participants' && (
+                        <ParticipantsPanel 
+                            participants={participants}
+                            isHost={isHost}
+                            onMute={handleMuteParticipant}
+                            onKick={handleKickParticipant}
+                        />
+                    )}
+                    {activePanel === 'share' && (
+                        <SharePanel 
+                            meetingLink={meetingLink} 
+                            handleCopy={handleCopy} 
+                            copiedItem={copiedItem} 
+                        />
+                    )}
+                    {activePanel === 'chat' && (
+                        <motion.div key="chat-placeholder" className="p-4 text-center text-slate-400 text-sm" initial={{opacity: 0}} animate={{opacity: 1}} exit={{opacity: 0}}>
+                            <p>Chat panel is managed by Jitsi.</p>
+                            <p className="mt-2">Clicking the button again will close it.</p>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
 
-                <div className="mt-auto pt-4 border-t border-slate-800 flex-shrink-0">
-                     <div className={`flex items-center justify-center gap-2.5 text-xs font-semibold rounded-lg p-2 ${isStreaming ? 'bg-red-500/20 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
-                           {isStreaming ? (
-                               <><Radio size={14} className="animate-pulse" /><span>STREAMING LIVE</span></>
-                           ) : (
-                               <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span><span>Connected</span></>
-                           )}
-                     </div>
+            <div className="mt-auto pt-4 border-t border-slate-800 flex-shrink-0">
+                 <div className="flex items-center justify-center gap-2.5 text-xs font-semibold rounded-lg p-2 bg-green-500/10 text-green-400">
+                    <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span><span>Connected & Secure</span>
                 </div>
             </div>
-        </aside>
+        </motion.aside>
     );
 };
 
-export default MeetingSidebar;
+export default NEW_MeetingSidebar;

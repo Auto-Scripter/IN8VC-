@@ -448,43 +448,49 @@ const MeetingPage = () => {
     }, []);
 
     useEffect(() => {
-    const initializePage = async () => {
-        if (!meetingId || !currentUser) return;
+        const initializePage = async () => {
+            // CHANGED: Removed the check for currentUser here to allow the effect to run
+            if (!meetingId) return;
 
-        setIsPageLoading(true);
-        try {
-            const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
-            if (meetingDoc.exists()) {
-                const meetingData = meetingDoc.data();
-                const isUserTheHost = currentUser?.uid === meetingData.createdBy;
-
-                setActiveMeeting({
-                    id: meetingId,
-                    displayName: userName,
-                    ...meetingData,
-                    isHost: isUserTheHost
-                });
-                // +++ START the Jitsi loader HERE +++
-                setIsJitsiLoading(true); 
-            } else {
-                showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
-                navigate('/meeting');
+            // ADDED: Wait for currentUser to be available before proceeding
+            if (!currentUser) {
+                // If the user isn't loaded yet, wait. This effect will re-run when currentUser changes.
+                return;
             }
-        } catch (error) {
-            console.error("Firebase fetch error:", error);
-            showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
-            navigate('/meeting');
-        } finally {
-            setIsPageLoading(false);
-        }
-    };
-    
-    if (meetingId && currentUser) {
+
+            setIsPageLoading(true);
+            try {
+                const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
+                if (meetingDoc.exists()) {
+                    const meetingData = meetingDoc.data();
+                    
+                    // ADDED: Host verification logic
+                    const localHostToken = localStorage.getItem(`hostToken_${meetingId}`);
+                    const isUserTheHost = !!(localHostToken && localHostToken === meetingData.hostToken);
+
+                    setActiveMeeting({
+                        id: meetingId,
+                        displayName: userName,
+                        ...meetingData,
+                        isHost: isUserTheHost // ADDED: Pass host status to the meeting object
+                    });
+                    setIsJitsiLoading(true);
+                } else {
+                    showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
+                    navigate('/meeting');
+                }
+            } catch (error) {
+                console.error("Firebase fetch error:", error);
+                showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
+                navigate('/meeting');
+            } finally {
+                setIsPageLoading(false);
+            }
+        };
+        
         initializePage();
-    } else if (!meetingId) {
-        setIsPageLoading(false);
-    }
-}, [meetingId, currentUser, navigate]); // Dependencies are correct
+        // CHANGED: The dependency array now correctly re-runs when currentUser is set.
+    }, [meetingId, currentUser, navigate, userName]);
 
 // In MeetingPage -> handleApiReady
 const handleApiReady = useCallback((api) => {
@@ -518,19 +524,35 @@ const handleApiReady = useCallback((api) => {
 
     const showToast = (toastData) => { setActiveToast({ id: Date.now(), ...toastData }); };
 
-    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
+   const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
         setIsLoading(true);
         if (!currentUser) {
             showToast({ title: 'Auth Error', message: 'You must be logged in.', type: 'error' });
             setIsLoading(false); return;
         }
         if (formData.hostName) localStorage.setItem('userName', formData.hostName);
+        
         try {
-            const meetingPayload = { ...formData, createdBy: currentUser.uid, createdAt: serverTimestamp() };
+            // ADDED: 1. Generate a unique host token
+            const hostToken = crypto.randomUUID();
+
+            // CHANGED: 2. Add the host token to the payload sent to Firestore
+            const meetingPayload = { 
+                ...formData, 
+                createdBy: currentUser.uid, 
+                createdAt: serverTimestamp(),
+                hostToken: hostToken // The new token
+            };
+
             const docRef = await addDoc(collection(db, 'meetings'), meetingPayload);
             const link = `${window.location.origin}/meeting/${docRef.id}`;
+            
+            // ADDED: 3. Save the token in localStorage, associated with the new meeting ID
+            localStorage.setItem(`hostToken_${docRef.id}`, hostToken);
+            
             setNewMeetingLink(link);
             showToast({ title: 'Success!', message: `Meeting ${scheduleOption === 'now' ? 'created' : 'scheduled'}!`, type: 'success' });
+            
             if (scheduleOption === 'now') {
                 navigate(`/meeting/${docRef.id}`);
             } else {
@@ -572,7 +594,13 @@ const handleApiReady = useCallback((api) => {
     return (
         <div className="flex h-screen relative z-10 overflow-hidden">
             {activeMeeting ? (
-                <MeetingSidebar isOpen={isMeetingSidebarOpen} setIsOpen={setIsMeetingSidebarOpen} jitsiApi={jitsiApi} meetingLink={newMeetingLink || `${window.location.origin}/meeting/${activeMeeting.id}`} />
+                <MeetingSidebar  isOpen={isMeetingSidebarOpen} 
+                    setIsOpen={setIsMeetingSidebarOpen} 
+                    jitsiApi={jitsiApi} 
+                    meetingLink={newMeetingLink || `${window.location.origin}/meeting/${activeMeeting.id}`}
+                    isHost={activeMeeting.isHost}
+                    localDisplayName={activeMeeting.displayName}
+/>
             ) : (
                 <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
             )}
@@ -608,14 +636,15 @@ const handleApiReady = useCallback((api) => {
                                 />
 
                                 {jitsiApi && ( 
-                                    <CustomControls 
-                                        jitsiApi={jitsiApi} 
-                                        onHangup={handleEndMeeting} 
-                                        areControlsVisible={areControlsVisible}
-                                        pauseTimer={() => clearTimeout(inactivityTimer.current)}
-                                        resumeTimer={showControlsAndResetTimer}
-                                    /> 
-                                )}
+    <CustomControls 
+        jitsiApi={jitsiApi} 
+        onHangup={handleEndMeeting} 
+        areControlsVisible={areControlsVisible}
+        pauseTimer={() => clearTimeout(inactivityTimer.current)}
+        resumeTimer={showControlsAndResetTimer}
+        isHost={activeMeeting.isHost} // ❗️ ADD THIS LINE ❗️
+    /> 
+)}
                             </motion.div>
                         ) : (
                             <div key="dashboard-view" ref={dashboardContainerRef} className="h-full flex flex-col gap-6">

@@ -113,7 +113,7 @@ const MenuItem = ({ icon: Icon, label, onClick }) => (
         <span>{label}</span>
     </button>);
 
-const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer }) => {
+const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer, isHost }) => {
     // ... (states without changes)
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
@@ -231,7 +231,6 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     };
     const handleToggleNoiseSuppression = () => executeCommandAndCloseMenu('toggleNoiseSuppression');
     const handleToggleWhiteboard = () => executeCommandAndCloseMenu('toggleWhiteboard');
-    const handleShowStats = () => executeCommandAndCloseMenu('toggleSpeakerStats');
     const handleToggleView = () => executeCommandAndCloseMenu('toggleTileView');
 
     return (
@@ -260,8 +259,25 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                     <ControlButtonWithTooltip onClick={toggleVideo} tooltip={isVideoMuted ? 'Start Video' : 'Stop Video'} className={isVideoMuted ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}>{isVideoMuted ? <VideoOff size={22} /> : <Video size={22} />}</ControlButtonWithTooltip>
                     <ControlButtonWithTooltip onClick={toggleScreenShare} tooltip="Share Screen" className="bg-gray-700 hover:bg-gray-600"><MonitorUp size={22} /></ControlButtonWithTooltip>
                     <ControlButtonWithTooltip onClick={raiseHand} tooltip="Raise Hand" className="bg-gray-700 hover:bg-gray-600"><Hand size={22} /></ControlButtonWithTooltip>
-                    <ControlButtonWithTooltip onClick={() => isStreaming ? handleStopStream() : setIsStreamModalOpen(true)} tooltip={isStreaming ? "Stop Live Stream" : "Go Live"} className={isStreaming ? 'bg-green-500 text-white live-indicator' : 'bg-cyan-600 hover:bg-cyan-500'}><Radio size={22} /></ControlButtonWithTooltip>
-                    <ControlButtonWithTooltip onClick={toggleRecording} tooltip={isRecording ? "Stop Recording" : "Start Recording"} className={isRecording ? 'bg-red-600 text-white recording-indicator' : 'bg-gray-700 hover:bg-gray-600'}><CircleDot size={22} /></ControlButtonWithTooltip>
+                    {isHost && (
+                        <>
+                            <ControlButtonWithTooltip 
+                                onClick={() => isStreaming ? handleStopStream() : setIsStreamModalOpen(true)} 
+                                tooltip={isStreaming ? "Stop Live Stream" : "Go Live"} 
+                                className={isStreaming ? 'bg-green-500 text-white live-indicator' : 'bg-cyan-600 hover:bg-cyan-500'}
+                            >
+                                <Radio size={22} />
+                            </ControlButtonWithTooltip>
+                            
+                            <ControlButtonWithTooltip 
+                                onClick={toggleRecording} 
+                                tooltip={isRecording ? "Stop Recording" : "Start Recording"} 
+                                className={isRecording ? 'bg-red-600 text-white recording-indicator' : 'bg-gray-700 hover:bg-gray-600'}
+                            >
+                                <CircleDot size={22} />
+                            </ControlButtonWithTooltip>
+                        </>
+                    )}
                     
                     <div className="relative" ref={menuRef}>
                         <ControlButtonWithTooltip
@@ -287,9 +303,10 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                                     ) : (
                                         <MenuItem icon={Youtube} label="Share a video" onClick={handleOpenShareModal} />
                                     )}
-                                    <MenuItem icon={Waves} label="Noise Suppression" onClick={handleToggleNoiseSuppression} />
-                                    <MenuItem icon={Paintbrush} label="Show Whiteboard" onClick={handleToggleWhiteboard} />
-                                    <MenuItem icon={BarChart3} label="Participants Stats" onClick={handleShowStats} />
+                                    {isHost && ( <MenuItem icon={Waves} label="Noise Suppression" onClick={handleToggleNoiseSuppression} /> )}
+                                    {isHost && (
+        <MenuItem icon={Paintbrush} label="Show Whiteboard" onClick={handleToggleWhiteboard} />
+    )}
                                     <MenuItem icon={LayoutGrid} label="Toggle Tile View" onClick={handleToggleView} />
                                 </motion.div>
                             )}
