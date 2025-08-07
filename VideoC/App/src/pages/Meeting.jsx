@@ -424,6 +424,7 @@ const MeetingPage = () => {
     const [jitsiApi, setJitsiApi] = useState(null);
     const [isMeetingSidebarOpen, setIsMeetingSidebarOpen] = useState(true);
     const dashboardContainerRef = useRef(null);
+    const [isJitsiLoading, setIsJitsiLoading] = useState(false);
 
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const inactivityTimer = useRef(null);
@@ -447,41 +448,50 @@ const MeetingPage = () => {
     }, []);
 
     useEffect(() => {
-        const initializePage = async () => {
-            if (meetingId) {
-                if (activeMeeting?.id === meetingId) {
-                    setIsPageLoading(false);
-                    return;
-                }
-                try {
-                    const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
-                    if (meetingDoc.exists()) {
-                        const meetingData = meetingDoc.data();
-                        setActiveMeeting({
-                            id: meetingId,
-                            displayName: userName,
-                            ...meetingData
-                        });
-                    } else {
-                        showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
-                        navigate('/meeting');
-                    }
-                } catch (error) {
-                    showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
-                    navigate('/meeting');
-                } finally {
-                    setIsPageLoading(false);
-                }
-            } else {
-                if(activeMeeting) setActiveMeeting(null);
-                setIsPageLoading(false);
-            }
-        };
+    const initializePage = async () => {
+        if (!meetingId || !currentUser) return;
 
-        if (userName) {
-            initializePage();
+        setIsPageLoading(true);
+        try {
+            const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
+            if (meetingDoc.exists()) {
+                const meetingData = meetingDoc.data();
+                const isUserTheHost = currentUser?.uid === meetingData.createdBy;
+
+                setActiveMeeting({
+                    id: meetingId,
+                    displayName: userName,
+                    ...meetingData,
+                    isHost: isUserTheHost
+                });
+                // +++ START the Jitsi loader HERE +++
+                setIsJitsiLoading(true); 
+            } else {
+                showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
+                navigate('/meeting');
+            }
+        } catch (error) {
+            console.error("Firebase fetch error:", error);
+            showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
+            navigate('/meeting');
+        } finally {
+            setIsPageLoading(false);
         }
-    }, [meetingId, userName]);
+    };
+    
+    if (meetingId && currentUser) {
+        initializePage();
+    } else if (!meetingId) {
+        setIsPageLoading(false);
+    }
+}, [meetingId, currentUser, navigate]); // Dependencies are correct
+
+// In MeetingPage -> handleApiReady
+const handleApiReady = useCallback((api) => {
+    setJitsiApi(api);
+    // +++ STOP the Jitsi loader HERE +++
+    setIsJitsiLoading(false);
+}, []);
 
 
     const showControlsAndResetTimer = useCallback(() => {
@@ -555,8 +565,6 @@ const MeetingPage = () => {
         navigate('/meeting');
     }, [navigate]);
 
-    const handleApiReady = useCallback((api) => { setJitsiApi(api); }, []);
-
     if (isPageLoading) {
         return <LoadingScreen />;
     }
@@ -579,16 +587,20 @@ const MeetingPage = () => {
                 <main className={`flex-1 flex flex-col h-full transition-all duration-300 ${activeMeeting ? 'p-0' : 'p-4 sm:p-6'}`}>
                     <AnimatePresence mode="wait">
                         {activeMeeting ? (
-                            <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-900 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
-                                <div className="flex-grow w-full h-0">
-                                    <JitsiMeet
-                                        domain="meet.in8.com" roomName={activeMeeting.id} displayName={activeMeeting.displayName || userName}
-                                        password={activeMeeting.password} onMeetingEnd={handleEndMeeting} onApiReady={handleApiReady}
-                                        startWithVideoMuted={activeMeeting.startWithVideoMuted} startWithAudioMuted={activeMeeting.startWithAudioMuted}
-                                        prejoinPageEnabled={activeMeeting.prejoinPageEnabled} toolbarButtons={EMPTY_TOOLBAR}
-                                    />
-                                </div>
-                                
+        <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-900 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
+            
+            {/* +++ Render LoadingScreen when Jitsi is loading +++ */}
+            {isJitsiLoading && <LoadingScreen />}
+
+            {/* Hide the Jitsi container until it's fully loaded */}
+            <div className="flex-grow w-full h-0" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
+                <JitsiMeet
+                    domain="meet.in8.com" roomName={activeMeeting.id} displayName={activeMeeting.displayName || userName}
+                    password={activeMeeting.password} onMeetingEnd={handleEndMeeting} onApiReady={handleApiReady}
+                    startWithVideoMuted={activeMeeting.startWithVideoMuted} startWithAudioMuted={activeMeeting.startWithAudioMuted}
+                    prejoinPageEnabled={activeMeeting.prejoinPageEnabled} toolbarButtons={EMPTY_TOOLBAR}
+                />
+            </div>  
                                 <div 
                                     className={`absolute top-0 left-0 w-full h-full z-10 
                                         ${areControlsVisible ? 'pointer-events-none' : 'pointer-events-auto'}`

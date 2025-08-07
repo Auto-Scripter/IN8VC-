@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
     Mic, MicOff, Video, VideoOff, PhoneOff, MonitorUp, Hand, Radio, CircleDot,
     MoreVertical,
-    Youtube, Waves, Paintbrush, Image as ImageIcon, BarChart3, LayoutGrid, X
+    Youtube, Waves, Paintbrush, BarChart3, LayoutGrid, X
 } from 'lucide-react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
-import StreamKeyModal from './StreamKeyModal'; 
+import StreamKeyModal from './StreamKeyModal';
 
 const ShareVideoModal = ({ onShare, onClose }) => {
     const [videoUrl, setVideoUrl] = useState('');
@@ -16,9 +16,7 @@ const ShareVideoModal = ({ onShare, onClose }) => {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (videoUrl.trim()) {
-            onShare(videoUrl.trim());
-        }
-    };
+            onShare(videoUrl.trim());}};
 
     return (
         <motion.div
@@ -26,16 +24,16 @@ const ShareVideoModal = ({ onShare, onClose }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
-        >
+            onClick={onClose}>
+
             <motion.div
                 className="bg-slate-800/80 backdrop-blur-lg border border-slate-700 p-6 rounded-xl shadow-xl w-full max-w-lg"
                 initial={{ scale: 0.95, y: -20, opacity: 0 }}
                 animate={{ scale: 1, y: 0, opacity: 1 }}
                 exit={{ scale: 0.95, y: 20, opacity: 0 }}
                 transition={{ duration: 0.2, ease: 'easeOut' }}
-                onClick={(e) => e.stopPropagation()}
-            >
+                onClick={(e) => e.stopPropagation()}>
+                    
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-white">Share a YouTube Video</h2>
                     <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors p-1 rounded-full hover:bg-slate-700">
@@ -81,7 +79,7 @@ const ControlButtonWithTooltip = ({ onClick, tooltip, className = '', children }
     const [isHovered, setIsHovered] = useState(false);
 
     return (
-        <div 
+        <div
             className="relative flex flex-col items-center"
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -89,14 +87,14 @@ const ControlButtonWithTooltip = ({ onClick, tooltip, className = '', children }
             <AnimatePresence>
             {isHovered && (
                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    transition={{ duration: 0.2 }}
-                    className="absolute bottom-full mb-3 px-3 py-1.5 text-sm font-semibold text-white bg-gray-900/90 rounded-md shadow-lg pointer-events-none whitespace-nowrap"
-                >
-                    {tooltip}
-                </motion.div>
+                     initial={{ opacity: 0, y: 10 }}
+                     animate={{ opacity: 1, y: 0 }}
+                     exit={{ opacity: 0, y: 10 }}
+                     transition={{ duration: 0.2 }}
+                     className="absolute bottom-full mb-3 px-3 py-1.5 text-sm font-semibold text-white bg-gray-900/90 rounded-md shadow-lg pointer-events-none whitespace-nowrap"
+                 >
+                     {tooltip}
+                 </motion.div>
             )}
             </AnimatePresence>
             <button
@@ -105,22 +103,18 @@ const ControlButtonWithTooltip = ({ onClick, tooltip, className = '', children }
             >
                 {children}
             </button>
-        </div>
-    );
-};
+        </div>);};
 
 const MenuItem = ({ icon: Icon, label, onClick }) => (
     <button
         onClick={onClick}
-        className="w-full flex items-center gap-4 px-4 py-2.5 text-sm text-slate-200 text-left rounded-md hover:bg-slate-700/80 transition-colors"
-    >
+        className="w-full flex items-center gap-4 px-4 py-2.5 text-sm text-slate-200 text-left rounded-md hover:bg-slate-700/80 transition-colors">
         <Icon size={18} className="text-slate-400" />
         <span>{label}</span>
-    </button>
-);
+    </button>);
 
 const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer }) => {
-    // Internal state for button statuses
+    // ... (states without changes)
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
     const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
@@ -129,12 +123,10 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const [isRecording, setIsRecording] = useState(false);
     const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
     const [isVideoSharing, setIsVideoSharing] = useState(false);
-    
-    // Refs
+
+    // ... (refs and GSAP effects without changes)
     const menuRef = useRef(null);
     const containerRef = useRef(null);
-
-    // GSAP animation for showing/hiding the entire control bar
     useGSAP(() => {
         gsap.to(containerRef.current, {
             y: areControlsVisible ? '0%' : '150%',
@@ -143,8 +135,6 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
             ease: 'power3.out',
         });
     }, [areControlsVisible]);
-
-    // GSAP animations for recording/streaming indicators
     useGSAP(() => {
         if (isStreaming) {
             gsap.to('.live-indicator', { boxShadow: '0 0 15px 5px rgba(34, 197, 94, 0.7)', scale: 1.05, repeat: -1, yoyo: true, duration: 1.5, ease: 'power1.inOut' });
@@ -156,64 +146,38 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
         } else {
             gsap.killTweensOf('.recording-indicator');
         }
-    }, { scope: containerRef, dependencies: [isStreaming, isRecording] }); 
-
-    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    // +++ TEMPORARY DEBUGGER: Logs all Jitsi events to the console +++
-    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    useEffect(() => {
-        if (!jitsiApi) return;
-        const logAllEvents = (event) => {
-            // This will log every single event fired by the API
-            // Look for an event related to video sharing when you test
-            console.log('[JITSI DEBUG EVENT]', event);
-        };
-        jitsiApi.addEventListener('log', logAllEvents);
-        return () => {
-            jitsiApi.removeEventListener('log', logAllEvents);
-        };
-    }, [jitsiApi]);
-    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    // +++ END OF DEBUGGER                                          +++
-    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    }, { scope: containerRef, dependencies: [isStreaming, isRecording] });
 
 
-    // Effect for Jitsi event listeners to update button states
     useEffect(() => {
         if (!jitsiApi) return;
 
+        // Baki listeners waise hi rahenge
         jitsiApi.isAudioMuted().then(muted => setIsAudioMuted(muted));
         jitsiApi.isVideoMuted().then(muted => setIsVideoMuted(muted));
-        
+
         const handleAudioMute = ({ muted }) => setIsAudioMuted(muted);
         const handleVideoMute = ({ muted }) => setIsVideoMuted(muted);
         const handleStreamingStatus = ({ on }) => setIsStreaming(on);
         const handleRecordingStatus = ({ on }) => setIsRecording(on);
-        const handleSharedVideoStatus = (event) => {
-             // We are trying both possibilities, the debugger will tell us the correct one
-            if (event.status) {
-                setIsVideoSharing(event.status === 'start');
-            } else if (typeof event.on !== 'undefined') {
-                setIsVideoSharing(event.on);
-            }
-        };
-
+        
         jitsiApi.addEventListener('audioMuteStatusChanged', handleAudioMute);
         jitsiApi.addEventListener('videoMuteStatusChanged', handleVideoMute);
         jitsiApi.addEventListener('streamStatusChanged', handleStreamingStatus);
         jitsiApi.addEventListener('recordingStatusChanged', handleRecordingStatus);
-        jitsiApi.addEventListener('sharedVideoStatusChanged', handleSharedVideoStatus);
-        
+
+        // --- sharedVideoStatusChanged wala listener hata diya gaya hai ---
+        // Kyunki woh kaam nahi kar raha hai
+
         return () => {
             jitsiApi.removeEventListener('audioMuteStatusChanged', handleAudioMute);
             jitsiApi.removeEventListener('videoMuteStatusChanged', handleVideoMute);
             jitsiApi.removeEventListener('streamStatusChanged', handleStreamingStatus);
             jitsiApi.removeEventListener('recordingStatusChanged', handleRecordingStatus);
-            jitsiApi.removeEventListener('sharedVideoStatusChanged', handleSharedVideoStatus);
         };
     }, [jitsiApi]);
 
-    // Effect to handle clicking outside the "More Options" menu to close it
+    // ... (useEffect for clicking outside menu without changes)
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -228,7 +192,9 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
         };
     }, [isMoreMenuOpen]);
 
-    // Jitsi command functions
+    // --- YAHAN FUNCTIONS MEIN CHANGES KIYE GAYE HAIN ---
+    
+    // Command functions for main buttons
     const toggleAudio = () => jitsiApi?.executeCommand('toggleAudio');
     const toggleVideo = () => jitsiApi?.executeCommand('toggleVideo');
     const toggleScreenShare = () => jitsiApi?.executeCommand('toggleShareScreen');
@@ -239,18 +205,30 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
         jitsiApi?.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
         setIsStreamModalOpen(false);
     };
-    
-    const executeCommandAndCloseMenu = (command, ...args) => {
-        jitsiApi?.executeCommand(command, ...args);
-        setIsMoreMenuOpen(false);
-    };
 
-    const handleShareVideo = () => {
+    // Video Sharing Functions (Updated Logic)
+    const handleOpenShareModal = () => {
         setIsMoreMenuOpen(false);
         setIsShareVideoModalOpen(true);
     };
 
-    const handleStopShareVideo = () => executeCommandAndCloseMenu('stopShareVideo');
+    const handleStartSharing = (url) => {
+        jitsiApi?.executeCommand('startShareVideo', url);
+        setIsShareVideoModalOpen(false);
+        setIsVideoSharing(true); // Manually state ko TRUE set karein
+    };
+
+    const handleStopSharing = () => {
+        jitsiApi?.executeCommand('stopShareVideo');
+        setIsMoreMenuOpen(false);
+        setIsVideoSharing(false); // Manually state ko FALSE set karein
+    };
+
+    // Other menu functions
+    const executeCommandAndCloseMenu = (command, ...args) => {
+        jitsiApi?.executeCommand(command, ...args);
+        setIsMoreMenuOpen(false);
+    };
     const handleToggleNoiseSuppression = () => executeCommandAndCloseMenu('toggleNoiseSuppression');
     const handleToggleWhiteboard = () => executeCommandAndCloseMenu('toggleWhiteboard');
     const handleShowStats = () => executeCommandAndCloseMenu('toggleSpeakerStats');
@@ -259,50 +237,32 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     return (
         <>
             {isStreamModalOpen && ( <StreamKeyModal onStart={handleStartStream} onClose={() => setIsStreamModalOpen(false)} isLoading={false} /> )}
-            
+
             <AnimatePresence>
                 {isShareVideoModalOpen && (
                     <ShareVideoModal
                         onClose={() => setIsShareVideoModalOpen(false)}
-                        onShare={(url) => {
-                            executeCommandAndCloseMenu('startShareVideo', url);
-                        }}
+                        onShare={handleStartSharing} // Updated handler
                     />
                 )}
             </AnimatePresence>
-            
-            <div 
+
+            <div
                 ref={containerRef}
                 className="absolute bottom-5 left-1/2 -translate-x-1/2 w-auto z-20"
                 onMouseEnter={pauseTimer}
                 onMouseLeave={resumeTimer}
             >
                 <div className="bg-gray-950/80 backdrop-blur-xl border border-gray-700/50 rounded-full shadow-2xl p-3 flex justify-center items-center gap-3">
+
+                    {/* ... (Mic, Video, ScreenShare, Hand, Stream, Record buttons without changes) ... */}
+                    <ControlButtonWithTooltip onClick={toggleAudio} tooltip={isAudioMuted ? 'Unmute' : 'Mute'} className={isAudioMuted ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}>{isAudioMuted ? <MicOff size={22} /> : <Mic size={22} />}</ControlButtonWithTooltip>
+                    <ControlButtonWithTooltip onClick={toggleVideo} tooltip={isVideoMuted ? 'Start Video' : 'Stop Video'} className={isVideoMuted ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}>{isVideoMuted ? <VideoOff size={22} /> : <Video size={22} />}</ControlButtonWithTooltip>
+                    <ControlButtonWithTooltip onClick={toggleScreenShare} tooltip="Share Screen" className="bg-gray-700 hover:bg-gray-600"><MonitorUp size={22} /></ControlButtonWithTooltip>
+                    <ControlButtonWithTooltip onClick={raiseHand} tooltip="Raise Hand" className="bg-gray-700 hover:bg-gray-600"><Hand size={22} /></ControlButtonWithTooltip>
+                    <ControlButtonWithTooltip onClick={() => isStreaming ? handleStopStream() : setIsStreamModalOpen(true)} tooltip={isStreaming ? "Stop Live Stream" : "Go Live"} className={isStreaming ? 'bg-green-500 text-white live-indicator' : 'bg-cyan-600 hover:bg-cyan-500'}><Radio size={22} /></ControlButtonWithTooltip>
+                    <ControlButtonWithTooltip onClick={toggleRecording} tooltip={isRecording ? "Stop Recording" : "Start Recording"} className={isRecording ? 'bg-red-600 text-white recording-indicator' : 'bg-gray-700 hover:bg-gray-600'}><CircleDot size={22} /></ControlButtonWithTooltip>
                     
-                    <ControlButtonWithTooltip onClick={toggleAudio} tooltip={isAudioMuted ? 'Unmute' : 'Mute'} className={isAudioMuted ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}>
-                        {isAudioMuted ? <MicOff size={22} /> : <Mic size={22} />}
-                    </ControlButtonWithTooltip>
-
-                    <ControlButtonWithTooltip onClick={toggleVideo} tooltip={isVideoMuted ? 'Start Video' : 'Stop Video'} className={isVideoMuted ? 'bg-red-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}>
-                        {isVideoMuted ? <VideoOff size={22} /> : <Video size={22} />}
-                    </ControlButtonWithTooltip>
-                    
-                    <ControlButtonWithTooltip onClick={toggleScreenShare} tooltip="Share Screen" className="bg-gray-700 hover:bg-gray-600">
-                        <MonitorUp size={22} />
-                    </ControlButtonWithTooltip>
-
-                    <ControlButtonWithTooltip onClick={raiseHand} tooltip="Raise Hand" className="bg-gray-700 hover:bg-gray-600">
-                        <Hand size={22} />
-                    </ControlButtonWithTooltip>
-
-                    <ControlButtonWithTooltip onClick={() => isStreaming ? handleStopStream() : setIsStreamModalOpen(true)} tooltip={isStreaming ? "Stop Live Stream" : "Go Live"} className={isStreaming ? 'bg-green-500 text-white live-indicator' : 'bg-cyan-600 hover:bg-cyan-500'}>
-                        <Radio size={22} />
-                    </ControlButtonWithTooltip>
-
-                    <ControlButtonWithTooltip onClick={toggleRecording} tooltip={isRecording ? "Stop Recording" : "Start Recording"} className={isRecording ? 'bg-red-600 text-white recording-indicator' : 'bg-gray-700 hover:bg-gray-600'}>
-                        <CircleDot size={22} />
-                    </ControlButtonWithTooltip>
-
                     <div className="relative" ref={menuRef}>
                         <ControlButtonWithTooltip
                             onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
@@ -321,10 +281,11 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                                     transition={{ duration: 0.15, ease: 'easeOut' }}
                                     className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 w-64 bg-slate-800/90 backdrop-blur-lg border border-slate-700 rounded-lg shadow-2xl p-2"
                                 >
+                                    {/* --- YAHAN NAYA LOGIC KAAM KAREGA --- */}
                                     {isVideoSharing ? (
-                                        <MenuItem icon={Youtube} label="Stop sharing video" onClick={handleStopShareVideo} />
+                                        <MenuItem icon={Youtube} label="Stop sharing video" onClick={handleStopSharing} />
                                     ) : (
-                                        <MenuItem icon={Youtube} label="Share a video" onClick={handleShareVideo} />
+                                        <MenuItem icon={Youtube} label="Share a video" onClick={handleOpenShareModal} />
                                     )}
                                     <MenuItem icon={Waves} label="Noise Suppression" onClick={handleToggleNoiseSuppression} />
                                     <MenuItem icon={Paintbrush} label="Show Whiteboard" onClick={handleToggleWhiteboard} />
@@ -338,7 +299,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                     <ControlButtonWithTooltip onClick={onHangup} tooltip="Leave Meeting" className="bg-red-600 text-white hover:bg-red-500">
                         <PhoneOff size={22} />
                     </ControlButtonWithTooltip>
-                    
+
                 </div>
             </div>
         </>
