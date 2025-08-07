@@ -591,7 +591,11 @@ const handleApiReady = useCallback((api) => {
         return <LoadingScreen />;
     }
 
+    console.log('Am I the host?', activeMeeting.isHost);
+
+
     return (
+
         <div className="flex h-screen relative z-10 overflow-hidden">
             {activeMeeting ? (
                 <MeetingSidebar  isOpen={isMeetingSidebarOpen} 
@@ -601,6 +605,7 @@ const handleApiReady = useCallback((api) => {
                     isHost={activeMeeting.isHost}
                     localDisplayName={activeMeeting.displayName}
 />
+
             ) : (
                 <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
             )}
@@ -622,18 +627,27 @@ const handleApiReady = useCallback((api) => {
 
             {/* Hide the Jitsi container until it's fully loaded */}
             <div className="flex-grow w-full h-0" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
-                <JitsiMeet
-                    domain="meet.in8.com" roomName={activeMeeting.id} displayName={activeMeeting.displayName || userName}
-                    password={activeMeeting.password} onMeetingEnd={handleEndMeeting} onApiReady={handleApiReady}
-                    startWithVideoMuted={activeMeeting.startWithVideoMuted} startWithAudioMuted={activeMeeting.startWithAudioMuted}
-                    prejoinPageEnabled={activeMeeting.prejoinPageEnabled} toolbarButtons={EMPTY_TOOLBAR}
-                />
-            </div>  
+    <JitsiMeet
+        domain="meet.in8.com" 
+        roomName={activeMeeting.id} 
+        displayName={activeMeeting.displayName || userName}
+        password={activeMeeting.password} 
+        onMeetingEnd={handleEndMeeting} 
+        onApiReady={handleApiReady}
+        startWithVideoMuted={activeMeeting.startWithVideoMuted} 
+        startWithAudioMuted={activeMeeting.startWithAudioMuted}
+        prejoinPageEnabled={activeMeeting.prejoinPageEnabled} 
+        toolbarButtons={EMPTY_TOOLBAR}
+        showToast={showToast}
+        noiseSuppressionEnabled={true} 
+/>
+</div>
                                 <div 
                                     className={`absolute top-0 left-0 w-full h-full z-10 
                                         ${areControlsVisible ? 'pointer-events-none' : 'pointer-events-auto'}`
                                     }
                                 />
+                                
 
                                 {jitsiApi && ( 
     <CustomControls 
@@ -643,6 +657,8 @@ const handleApiReady = useCallback((api) => {
         pauseTimer={() => clearTimeout(inactivityTimer.current)}
         resumeTimer={showControlsAndResetTimer}
         isHost={activeMeeting.isHost} // ❗️ ADD THIS LINE ❗️
+        showToast={showToast} // This line must be present
+
     /> 
 )}
                             </motion.div>

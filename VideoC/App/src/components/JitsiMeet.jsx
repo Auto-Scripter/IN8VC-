@@ -8,14 +8,14 @@ const JitsiMeet = React.memo(({
     domain,
     onMeetingEnd,
     onApiReady,
-    // highlight-start
-    // New prop to notify parent about recording status changes
     onRecordingStatusChanged, 
-    // highlight-end
     startWithVideoMuted,
     startWithAudioMuted,
     prejoinPageEnabled,
     toolbarButtons,
+    // highlight-start
+    noiseSuppressionEnabled, // New prop to control noise suppression
+    // highlight-end
     jwt,
 }) => {
     const jitsiContainerRef = useRef(null);
@@ -24,8 +24,7 @@ const JitsiMeet = React.memo(({
     useEffect(() => {
         if (!jitsiContainerRef.current) return;
         
-        // This should ideally use the domain prop, but keeping your structure
-        const effectiveDomain = "meet.in8.com";
+        const effectiveDomain = domain;
 
         const script = document.createElement('script');
         script.src = `https://${effectiveDomain}/external_api.js`;
@@ -52,6 +51,12 @@ const JitsiMeet = React.memo(({
                     startWithVideoMuted,
                     startWithAudioMuted,
                     prejoinPageEnabled,
+                    // highlight-start
+                    // Add this object to enable the feature
+                    noiseSuppression: {
+                        enabled: noiseSuppressionEnabled,
+                    },
+                    // highlight-end
                 },
                 interfaceConfigOverwrite: {
                     TOOLBAR_BUTTONS: toolbarButtons,
@@ -61,28 +66,23 @@ const JitsiMeet = React.memo(({
             
             apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options, jwt);
 
-            // Notify parent that the API is ready
             apiRef.current.addEventListener('videoConferenceJoined', () => {
                 if (onApiReady && typeof onApiReady === 'function') {
                     onApiReady(apiRef.current);
                 }
             });
 
-            // Notify parent when the meeting ends
             apiRef.current.addEventListener('videoConferenceLeft', () => {
                 if (onMeetingEnd && typeof onMeetingEnd === 'function') {
                     onMeetingEnd();
                 }
             });
 
-            // highlight-start
-            // Notify parent about recording status changes
             apiRef.current.addEventListener('recordingStatusChanged', (status) => {
                 if (onRecordingStatusChanged && typeof onRecordingStatusChanged === 'function') {
-                    onRecordingStatusChanged(status); // Pass the whole status object
+                    onRecordingStatusChanged(status);
                 }
             });
-            // highlight-end
         };
 
         return () => {
@@ -96,9 +96,8 @@ const JitsiMeet = React.memo(({
         };
     }, [
         domain, roomName, displayName, password, onMeetingEnd, onApiReady,
-        onRecordingStatusChanged, // Add new prop to dependency array
-        startWithVideoMuted, startWithAudioMuted, prejoinPageEnabled, toolbarButtons,
-        jwt
+        onRecordingStatusChanged, startWithVideoMuted, startWithAudioMuted, 
+        prejoinPageEnabled, toolbarButtons, jwt, noiseSuppressionEnabled // Add new prop to dependency array
     ]);
 
     return (
@@ -110,7 +109,7 @@ const JitsiMeet = React.memo(({
     );
 });
 
-// Add the new prop to propTypes for validation and clarity
+// Add the new prop to propTypes
 JitsiMeet.propTypes = {
     domain: PropTypes.string,
     roomName: PropTypes.string.isRequired,
@@ -118,11 +117,14 @@ JitsiMeet.propTypes = {
     password: PropTypes.string,
     onMeetingEnd: PropTypes.func.isRequired,
     onApiReady: PropTypes.func.isRequired,
-    onRecordingStatusChanged: PropTypes.func, // New propType
+    onRecordingStatusChanged: PropTypes.func,
     startWithVideoMuted: PropTypes.bool,
     startWithAudioMuted: PropTypes.bool,
     prejoinPageEnabled: PropTypes.bool,
     toolbarButtons: PropTypes.arrayOf(PropTypes.string),
+    // highlight-start
+    noiseSuppressionEnabled: PropTypes.bool, // New propType
+    // highlight-end
     jwt: PropTypes.string,
 };
 
@@ -130,11 +132,14 @@ JitsiMeet.propTypes = {
 JitsiMeet.defaultProps = {
     domain: 'meet.in8.com',
     password: '',
-    onRecordingStatusChanged: () => {}, // Default empty function
+    onRecordingStatusChanged: () => {},
     startWithVideoMuted: false,
     startWithAudioMuted: false,
     prejoinPageEnabled: false,
     toolbarButtons: [],
+    // highlight-start
+    noiseSuppressionEnabled: true, // Enable by default
+    // highlight-end
     jwt: undefined,
 };
 
