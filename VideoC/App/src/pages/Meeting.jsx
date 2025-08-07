@@ -591,9 +591,6 @@ const handleApiReady = useCallback((api) => {
         return <LoadingScreen />;
     }
 
-    console.log('Am I the host?', activeMeeting.isHost);
-
-
     return (
 
         <div className="flex h-screen relative z-10 overflow-hidden">
@@ -649,16 +646,15 @@ const handleApiReady = useCallback((api) => {
                                 />
                                 
 
-                                {jitsiApi && ( 
+                                {jitsiApi &&  activeMeeting &&( 
     <CustomControls 
         jitsiApi={jitsiApi} 
         onHangup={handleEndMeeting} 
         areControlsVisible={areControlsVisible}
         pauseTimer={() => clearTimeout(inactivityTimer.current)}
         resumeTimer={showControlsAndResetTimer}
-        isHost={activeMeeting.isHost} // ❗️ ADD THIS LINE ❗️
-        showToast={showToast} // This line must be present
-
+        isHost={activeMeeting.isHost}
+        showToast={showToast}
     /> 
 )}
                             </motion.div>

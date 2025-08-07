@@ -187,7 +187,7 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     };
 }, [jitsiApi, isHost, updateParticipantList]); // Dependencies
 
-    const handleMuteParticipant = (participantId) => jitsiApi?.executeCommand('muteParticipant', participantId);
+    const handleMuteParticipant = (participantId) => jitsiApi?.executeCommand('mute', participantId);
     const handleKickParticipant = (participantId) => {
         if (window.confirm("Are you sure you want to remove this participant?")) {
             jitsiApi?.executeCommand('kickParticipant', participantId);
