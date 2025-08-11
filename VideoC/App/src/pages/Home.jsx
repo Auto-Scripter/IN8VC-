@@ -4,6 +4,7 @@ import {
     Bell, Video, Plus, Calendar, KeyRound, Settings, Film,
     Users, Clock, User, LogOut, ChevronDown, Phone
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 // --- MOCK DATA for Member View ---
 const upcomingMeetingsData = [
@@ -61,7 +62,7 @@ const AppHeader = ({ userName }) => {
                 <h2 className="text-2xl font-bold text-white">IN8</h2>
                 <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
                     <a href="#" className="text-white font-semibold">Home</a>
-                    <a href="#" className="hover:text-white transition-colors">My Meetings</a>
+                    <Link to="/dashboard" className="hover:text-white transition-colors">My Meetings</Link>
                     <a href="#" className="hover:text-white transition-colors">Recordings</a>
                     <a href="#" className="hover:text-white transition-colors">Contacts</a>
                 </nav>

@@ -9,6 +9,8 @@ import {
     Mic, MicOff, VideoOff, PanelLeftOpen, Settings as SettingsIcon, Hand, MonitorUp, PhoneOff,
     Presentation, Timer, HardDriveDownload, CalendarClock
 } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+
 
 import { InfoPanel } from '../components/InfoPanel';
 import Sidebar from "../components/Sidebar";
@@ -533,15 +535,13 @@ const handleApiReady = useCallback((api) => {
         if (formData.hostName) localStorage.setItem('userName', formData.hostName);
         
         try {
-            // ADDED: 1. Generate a unique host token
-            const hostToken = crypto.randomUUID();
+            const hostToken = uuidv4();
 
-            // CHANGED: 2. Add the host token to the payload sent to Firestore
             const meetingPayload = { 
                 ...formData, 
                 createdBy: currentUser.uid, 
                 createdAt: serverTimestamp(),
-                hostToken: hostToken // The new token
+                hostToken: hostToken
             };
 
             const docRef = await addDoc(collection(db, 'meetings'), meetingPayload);

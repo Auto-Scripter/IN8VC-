@@ -1,556 +1,366 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { gsap } from 'gsap';
-import { useGSAP } from '@gsap/react';
-import {
-    VideoIcon, Mail, Calendar, Clock, Video, X, Share2, Copy, Check,
-    Users, Film, MessageSquare, ArrowLeft, User as UserIcon, KeyRound, ChevronLeft, ChevronRight,
-    Mic, MicOff, VideoOff, PanelLeftOpen, Settings as SettingsIcon, Hand, MonitorUp, PhoneOff,
-    Presentation, Timer, HardDriveDownload, CalendarClock
-} from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-// Component Imports
-import { InfoPanel } from '../components/InfoPanel';
-import Sidebar from "../components/Sidebar";
-import Toast from "../components/Toast";
-import JitsiMeet from '../components/JitsiMeet';
-import CustomControls from '../components/CustomControls';
-import { db, auth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import MeetingSidebar from '../components/MeetingSidebar';
-
-
-const ShineButton = ({ children, ...props }) => {
-    const buttonRef = useRef(null);
-    const shineRef = useRef(null);
-    const timeline = useRef(null);
-
-    useGSAP(() => {
-        // Create a repeating timeline
-        timeline.current = gsap.timeline({ paused: true })
-            .fromTo(shineRef.current, 
-                { x: '-120%', skewX: -25 }, 
-                { x: '120%', skewX: -25, duration: 0.75, ease: 'power1.inOut' }
-            );
-    }, { scope: buttonRef });
-
-    const handleMouseEnter = () => {
-        timeline.current.restart();
-    };
-
-    return (
-        <motion.button
-            ref={buttonRef}
-            onMouseEnter={handleMouseEnter}
-            whileTap={{ scale: 0.98 }}
-            className="relative w-auto flex items-center justify-center gap-2 py-2.5 px-8 rounded-lg bg-blue-600 font-semibold text-white transition-colors duration-300 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
-            {...props}
-        >
-            {/* The shine element */}
-            <span
-                ref={shineRef}
-                className="absolute top-0 left-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/30 to-transparent"
-            />
-            {/* The button text */}
-            <span className="relative z-10">{children}</span>
-        </motion.button>
-    );
-};
-
-const AnimatedBackground = () => {
-    const numLines = 25;
-    const lines = Array.from({ length: numLines });
-    const lineVariants = {
-        hidden: { pathLength: 0, opacity: 0 },
-        visible: (i) => ({ pathLength: 1, opacity: 0.7, transition: { pathLength: { delay: i * 0.1, type: "spring", duration: 2, bounce: 0 }, opacity: { delay: i * 0.1, duration: 0.1 }}})
-    };
-    return (
-        <div className="absolute top-0 left-0 w-full h-full z-0 overflow-hidden">
-            <svg width="100%" height="100%" className="absolute top-0 left-0" preserveAspectRatio="none">
-                <defs><linearGradient id="line-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor="rgba(59, 130, 246, 0.2)" /><stop offset="100%" stopColor="rgba(139, 92, 246, 0.2)" /></linearGradient></defs>
-                {lines.map((_, i) => (<React.Fragment key={i}><motion.line x1="-5%" y1={`${(i / (numLines - 1)) * 100}%`} x2="105%" y2={`${(i / (numLines - 1)) * 100}%`} stroke="url(#line-gradient)" strokeWidth="0.3" variants={lineVariants} initial="hidden" animate="visible" custom={i} /><motion.line x1={`${(i / (numLines - 1)) * 100}%`} y1="-5%" x2={`${(i / (numLines - 1)) * 100}%`} y2="105%" stroke="url(#line-gradient)" strokeWidth="0.3" variants={lineVariants} initial="hidden" animate="visible" custom={i + 5} /></React.Fragment>))}
-            </svg>
-            <motion.div className="absolute -top-1/4 -left-1/4 w-1/2 h-1/2 bg-gradient-to-br from-blue-600/40 to-purple-600/40 rounded-full filter blur-3xl opacity-40" animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0], scale: [1, 1.1, 1, 1.05, 1], rotate: [0, 10, -10, 0] }} transition={{ duration: 30, repeat: Infinity, repeatType: "mirror", ease: "easeInOut" }} />
-            <motion.div className="absolute -bottom-1/4 -right-1/4 w-3/4 h-3/4 bg-gradient-to-tl from-purple-600/30 to-blue-600/30 rounded-full filter blur-3xl opacity-40" animate={{ x: [0, -30, 10, 0], y: [0, 20, -40, 0], scale: [1, 1.05, 1, 0.95, 1], rotate: [0, -15, 15, 0] }} transition={{ duration: 35, repeat: Infinity, repeatType: "mirror", ease: "easeInOut", delay: 5 }} />
-        </div>
-    );
-};
-
-const ShareModal = ({ meetingLink, onClose }) => {
-    // ... (no changes in this component)
-    const [isCopied, setIsCopied] = useState(false);
-    const handleCopy = () => {
-        navigator.clipboard.writeText(meetingLink).then(() => {
-            setIsCopied(true);
-            setTimeout(() => setIsCopied(false), 2500);
-        });
-    };
-    return (
-        <motion.div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="bg-slate-800/80 backdrop-blur-lg border border-slate-700 p-6 rounded-xl shadow-xl w-full max-w-md text-center" initial={{ scale: 0.9, y: -20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}>
-                <div className="flex justify-end"><button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={24} /></button></div>
-                <Share2 className="mx-auto text-blue-400 mb-3" size={40} />
-                <h2 className="text-2xl font-bold text-white mb-2">Meeting Ready!</h2>
-                <p className="text-slate-400 mb-6">Share this link with your invitees.</p>
-                <div className="flex items-center bg-slate-900/50 border border-slate-700 rounded-lg p-2 mb-4">
-                    <input type="text" readOnly value={meetingLink} className="flex-grow bg-transparent text-slate-300 text-sm outline-none px-2" />
-                    <button onClick={handleCopy} className={`flex items-center justify-center gap-2 w-28 px-4 py-2 rounded-md text-sm font-semibold transition-all duration-200 ${isCopied ? 'bg-emerald-500' : 'bg-blue-600 hover:bg-blue-500'}`}>{isCopied ? <><Check size={16}/> Copied!</> : <><Copy size={16}/> Copy</>}</button>
-                </div>
-                <div className="flex items-center justify-center gap-4"><a href={`mailto:?subject=Invitation to join meeting&body=Join my meeting with this link: ${meetingLink}`} className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 hover:bg-slate-700 transition-colors px-4 py-2 rounded-lg"><Mail size={18} /><span>Email</span></a></div>
-            </motion.div>
-        </motion.div>
-    );
-};
-
-// NOTE: The simple InfoPanel component that was here before has been removed, as we now import the enhanced version.
-
-const CustomCalendar = ({ selectedDate, setSelectedDate, close }) => {
-    // ... (no changes in this component)
-    const [date, setDate] = useState(selectedDate || new Date());
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const daysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
-    const firstDayOfMonth = (month, year) => new Date(year, month, 1).getDay();
-    const handlePrevMonth = () => setDate(new Date(date.getFullYear(), date.getMonth() - 1, 1));
-    const handleNextMonth = () => setDate(new Date(date.getFullYear(), date.getMonth() + 1, 1));
-    const handleSelectDate = (day) => {
-        const newDate = new Date(date.getFullYear(), date.getMonth(), day);
-        if (newDate < today) return;
-        setSelectedDate(newDate);
-        close();
-    };
-
-    const month = date.getMonth();
-    const year = date.getFullYear();
-    const numDays = daysInMonth(month, year);
-    const startDay = firstDayOfMonth(month, year);
-
-    return (
-        <motion.div
-            className="bg-slate-800 p-4 rounded-lg shadow-xl w-full max-w-xs border border-slate-700"
-            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-        >
-            <div className="flex justify-between items-center mb-4">
-                <button onClick={handlePrevMonth} className="p-2 rounded-full hover:bg-slate-700"><ChevronLeft size={20} /></button>
-                <span className="font-semibold text-lg">{date.toLocaleString('default', { month: 'long' })} {year}</span>
-                <button onClick={handleNextMonth} className="p-2 rounded-full hover:bg-slate-700"><ChevronRight size={20} /></button>
-            </div>
-            <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-2">
-                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => <div key={d}>{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-                {Array.from({ length: startDay }).map((_, i) => <div key={`empty-${i}`}></div>)}
-                {Array.from({ length: numDays }).map((_, i) => {
-                    const day = i + 1;
-                    const currentDate = new Date(year, month, day);
-                    const isPast = currentDate < today;
-                    const isToday = today.getTime() === currentDate.getTime();
-                    const isSelected = selectedDate && selectedDate.getTime() === currentDate.getTime();
-                    return (
-                        <button
-                            key={day}
-                            onClick={() => handleSelectDate(day)}
-                            disabled={isPast}
-                            className={`h-8 w-8 rounded-full flex items-center justify-center text-sm transition-colors
-                                ${isSelected ? 'bg-blue-500 text-white font-bold' : ''}
-                                ${!isSelected && isToday ? 'border border-blue-500 text-blue-400' : ''}
-                                ${!isSelected && !isToday ? 'hover:bg-slate-700' : ''}
-                                ${isPast ? 'text-slate-600 cursor-not-allowed' : ''}
-                            `}
-                        >
-                            {day}
-                        </button>
-                    )
-                })}
-            </div>
-        </motion.div>
-    );
-};
-
-const CustomTimePicker = ({ selectedTime, setSelectedTime, close }) => {
-    // ... (no changes in this component)
-    const [hour, setHour] = useState(selectedTime ? selectedTime.getHours() % 12 === 0 ? 12 : selectedTime.getHours() % 12 : 12);
-    const [minute, setMinute] = useState(selectedTime ? selectedTime.getMinutes() : 0);
-    const [period, setPeriod] = useState(selectedTime ? (selectedTime.getHours() >= 12 ? 'PM' : 'AM') : 'PM');
-
-    const handleSave = () => {
-        let finalHour = hour;
-        if (period === 'PM' && hour < 12) finalHour += 12;
-        if (period === 'AM' && hour === 12) finalHour = 0;
-
-        const newTime = new Date();
-        newTime.setHours(finalHour, minute);
-        setSelectedTime(newTime);
-        close();
-    };
-
-    return (
-        <motion.div
-            className="bg-slate-800 p-6 rounded-lg shadow-xl w-full max-w-xs border border-slate-700"
-            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-        >
-            <h3 className="text-lg font-semibold text-center mb-4">Select Time</h3>
-            <div className="flex items-center justify-center gap-2 text-4xl font-mono">
-                <input type="number" min="1" max="12" value={hour} onChange={e => setHour(Math.max(1, Math.min(12, parseInt(e.target.value) || 1)))} className="w-20 bg-slate-700 text-center rounded-lg p-2 outline-none focus:ring-2 ring-blue-500" />
-                <span>:</span>
-                <input type="number" min="0" max="59" step="1" value={String(minute).padStart(2, '0')} onChange={e => setMinute(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))} className="w-20 bg-slate-700 text-center rounded-lg p-2 outline-none focus:ring-2 ring-blue-500" />
-                <div className="flex flex-col gap-2 ml-2">
-                    <button onClick={() => setPeriod('AM')} className={`px-3 py-1 text-sm rounded-md transition-colors ${period === 'AM' ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300'}`}>AM</button>
-                    <button onClick={() => setPeriod('PM')} className={`px-3 py-1 text-sm rounded-md transition-colors ${period === 'PM' ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300'}`}>PM</button>
-                </div>
-            </div>
-            <button onClick={handleSave} className="w-full mt-6 py-2 px-4 rounded-lg bg-blue-600 font-semibold text-white transition-colors hover:bg-blue-500">Set Time</button>
-        </motion.div>
-    );
-};
-
-const SettingsModal = ({ formValues, handleInputChange, close }) => (
-    // ... (no changes in this component)
-    <motion.div
-        className="bg-slate-800 p-6 rounded-lg shadow-xl w-full max-w-sm border border-slate-700"
-        initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-    >
-        <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Advanced Settings</h3>
-            <button onClick={close} className="p-1 rounded-full hover:bg-slate-700"><X size={20} /></button>
-        </div>
-        <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
-                <div className="flex items-center gap-3">
-                    <Users className="text-slate-400" size={18} />
-                    <span className="text-slate-300 text-sm font-medium">Enable waiting room</span>
-                </div>
-                <button onClick={() => handleInputChange({ target: { name: 'waitingRoomEnabled', value: !formValues.waitingRoomEnabled } })} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formValues.waitingRoomEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}>
-                    <motion.span animate={{ x: formValues.waitingRoomEnabled ? 22 : 2 }} transition={{ type: 'spring', stiffness: 500, damping: 25 }} className="inline-block h-5 w-5 transform rounded-full bg-white" />
-                </button>
-            </div>
-        </div>
-    </motion.div>
+// Helper component for SVG Icons
+const Icon = ({ path, className = 'h-6 w-6' }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d={path} />
+    </svg>
 );
 
-const MeetingDetailsForm = ({
-    isScheduling, onSubmit, setView, formValues,
-    handleInputChange, handleDateChange, isLoading
-}) => {
-    const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-    const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+// --- Components ---
 
-    return (
-        <motion.form
-            key={isScheduling ? "schedule-form" : "start-form"}
-            onSubmit={onSubmit}
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -30 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="flex flex-col h-full"
-        >
-            <div className="flex justify-between items-center mb-6 shrink-0">
-                <div className="flex items-center gap-3">
-                    <button type="button" onClick={() => setView('initial')} className="p-2 rounded-full hover:bg-slate-800"><ArrowLeft size={22}/></button>
-                    <div>
-                        <h2 className="text-2xl font-bold text-white">{isScheduling ? 'Schedule a Meeting' : 'Start an Instant Meeting'}</h2>
-                        <p className="text-slate-400 text-sm">Fill in the details to get started.</p>
-                    </div>
-                </div>
-            </div>
-            
-            {/* Form area with new styled scrollbar */}
-            <div className="space-y-4 flex-grow overflow-y-auto pr-3 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800/50 scrollbar-thumb-rounded-full">
-                <div className="relative"><UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" name="userName" placeholder="Your Name*" value={formValues.userName} onChange={handleInputChange} required className="w-full bg-slate-800/50 border border-slate-700 rounded-lg py-3 pl-12 pr-4 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors" /></div>
-                <div className="relative"><VideoIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" name="meetingTitle" placeholder="Meeting Title*" value={formValues.meetingTitle} onChange={handleInputChange} required className="w-full bg-slate-800/50 border border-slate-700 rounded-lg py-3 pl-12 pr-4 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors" /></div>
-                <div className="relative"><MessageSquare className="absolute left-4 top-3.5 text-slate-400" size={18} /><textarea name="meetingPurpose" placeholder="Meeting Purpose (Optional)" value={formValues.meetingPurpose} onChange={handleInputChange} rows="3" className="w-full bg-slate-800/50 border border-slate-700 rounded-lg py-3 pl-12 pr-4 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 resize-none transition-colors" /></div>
-                <div className="relative"><KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="password" name="meetingPassword" placeholder="Set Password (Optional)" value={formValues.meetingPassword} onChange={handleInputChange} className="w-full bg-slate-800/50 border border-slate-700 rounded-lg py-3 pl-12 pr-4 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors" /></div>
-                {isScheduling && (
-                    <div className="grid sm:grid-cols-2 gap-4">
-                        <button type="button" onClick={() => setIsCalendarOpen(true)} className="w-full flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 hover:border-blue-500 transition-colors">
-                            <span>{formValues.scheduleDate ? formValues.scheduleDate.toLocaleDateString() : 'Select Date'}</span>
-                            <Calendar className="text-slate-400" size={18} />
-                        </button>
-                        <button type="button" onClick={() => setIsTimePickerOpen(true)} className="w-full flex items-center justify-between bg-slate-800/50 border border-slate-700 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 hover:border-blue-500 transition-colors">
-                            <span>{formValues.scheduleTime ? formValues.scheduleTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Select Time'}</span>
-                            <Clock className="text-slate-400" size={18} />
-                        </button>
-                    </div>
-                )}
-            </div>
-            <div className="pt-5 mt-auto flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                    <p className="text-sm text-slate-400 mr-2">Options:</p>
-                    <button type="button" onClick={() => handleInputChange({ target: { name: 'micEnabled', value: !formValues.micEnabled } })} className={`p-2 rounded-full transition-colors ${formValues.micEnabled ? 'bg-slate-700 text-white' : 'bg-red-500 text-white'}`} title={formValues.micEnabled ? 'Mic On' : 'Mic Off'}>
-                        {formValues.micEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-                    </button>
-                    <button type="button" onClick={() => handleInputChange({ target: { name: 'cameraEnabled', value: !formValues.cameraEnabled } })} className={`p-2 rounded-full transition-colors ${formValues.cameraEnabled ? 'bg-slate-700 text-white' : 'bg-red-500 text-white'}`} title={formValues.cameraEnabled ? 'Camera On' : 'Camera Off'}>
-                        {formValues.cameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
-                    </button>
-                    <button type="button" onClick={() => setIsSettingsOpen(true)} className="p-2 rounded-full bg-slate-700 text-white hover:bg-slate-600" title="Advanced Settings"><SettingsIcon size={18} /></button>
-                </div>
-                
-                {/* Replace the old button with the new ShineButton */}
-                <ShineButton type="submit" disabled={isLoading}>
-                    {isLoading ? 'Processing...' : (isScheduling ? 'Schedule Meeting' : 'Create & Start')}
-                </ShineButton>
-            </div>
-            <AnimatePresence>
-                {(isCalendarOpen || isTimePickerOpen || isSettingsOpen) && (
-                    <motion.div className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsCalendarOpen(false); setIsTimePickerOpen(false); setIsSettingsOpen(false); }}>
-                        {isCalendarOpen && <div onClick={(e) => e.stopPropagation()}><CustomCalendar selectedDate={formValues.scheduleDate} setSelectedDate={(date) => handleDateChange({target: {name: 'scheduleDate', value: date}})} close={() => setIsCalendarOpen(false)} /></div>}
-                        {isTimePickerOpen && <div onClick={(e) => e.stopPropagation()}><CustomTimePicker selectedTime={formValues.scheduleTime} setSelectedTime={(time) => handleDateChange({target: {name: 'scheduleTime', value: time}})} close={() => setIsTimePickerOpen(false)} /></div>}
-                        {isSettingsOpen && <div onClick={(e) => e.stopPropagation()}><SettingsModal formValues={formValues} handleInputChange={handleInputChange} close={() => setIsSettingsOpen(false)} /></div>}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.form>
-    );
-};
+// 1. Lobby Component: Meeting join karne se pehle ka screen
+const Lobby = ({ onJoinMeeting }) => {
+    const [roomName, setRoomName] = useState('');
+    const [displayName, setDisplayName] = useState('');
+    const [jwt, setJwt] = useState('');
 
-const CreateMeeting = ({ onSubmit, isLoading, initialUserName }) => {
-    const [view, setView] = useState('initial');
-    const [formValues, setFormValues] = useState({
-        userName: initialUserName || '', meetingTitle: '', meetingPurpose: '', meetingPassword: '',
-        scheduleDate: null, scheduleTime: null, micEnabled: true, cameraEnabled: true, waitingRoomEnabled: true,
-    });
-    const [joinCode, setJoinCode] = useState('');
-
-    const handleInputChange = (e) => setFormValues(prev => ({ ...prev, [e.target.name]: e.target.value }));
-    const handleDateChange = (e) => setFormValues(prev => ({ ...prev, [e.target.name]: e.target.value }));
-
-    const handleFormSubmit = (e) => {
+    const handleSubmit = (e) => {
         e.preventDefault();
-        const isScheduling = view === 'schedule';
-        const finalDateTime = (isScheduling && formValues.scheduleDate && formValues.scheduleTime) ? new Date( formValues.scheduleDate.getFullYear(), formValues.scheduleDate.getMonth(), formValues.scheduleDate.getDate(), formValues.scheduleTime.getHours(), formValues.scheduleTime.getMinutes() ) : null;
-        const formData = {
-            name: formValues.meetingTitle || (isScheduling ? 'Scheduled Meeting' : 'Instant Meeting'), purpose: formValues.meetingPurpose,
-            password: formValues.meetingPassword, isScheduled: isScheduling, scheduledFor: finalDateTime, hostName: formValues.userName,
-            startWithAudioMuted: !formValues.micEnabled, startWithVideoMuted: !formValues.cameraEnabled, prejoinPageEnabled: formValues.waitingRoomEnabled,
-        };
-        onSubmit(formData, isScheduling ? 'later' : 'now');
+        if (roomName && displayName) {
+            // Pass JWT to the join function
+            onJoinMeeting(roomName, displayName, jwt);
+        }
     };
-    
-    const handleJoinWithCode = () => {
-        if (!joinCode.trim()) return;
-        alert(`Joining meeting with code: ${joinCode}`);
-        // In a real app: window.location.href = `/meeting/${joinCode}`;
-    }
 
     return (
-        <div
-            className="p-6 bg-slate-900 border border-slate-700/60 h-full flex flex-col justify-center rounded-lg"
-            style={{ backgroundImage: 'radial-gradient(ellipse at top, rgba(59, 130, 246, 0.15), transparent 60%)' }}
-        >
-            <AnimatePresence mode="wait">
-                {view === 'initial' && (
-                    <motion.div
-                        key="initial-view"
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        className="flex flex-col items-center justify-center h-full text-center"
-                    >
-                        <h2 className="text-3xl font-bold text-white">Start or Join a Meeting</h2>
-                        <p className="text-slate-400 mt-2 mb-8 max-w-md mx-auto">Create a new meeting instantly, schedule one for later, or join using a code.</p>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
-                            <motion.button onClick={() => setView('startNow')} whileTap={{ scale: 0.98 }} className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg bg-blue-600 text-white font-semibold transition-colors hover:bg-blue-500">
-                                <Video size={24} />
-                                <span>New Meeting</span>
-                            </motion.button>
-                             <motion.button onClick={() => setView('schedule')} whileTap={{ scale: 0.98 }} className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 font-semibold transition-colors hover:bg-slate-700">
-                                <Calendar size={24} />
-                                <span>Schedule for Later</span>
-                            </motion.button>
-                        </div>
-                        
-                        <div className="w-full max-w-md my-6"><div className="w-full h-px bg-slate-700"></div></div>
-
-                        <div className="w-full max-w-md mx-auto">
-                            <label className="text-sm font-medium text-slate-400 block text-left mb-2">Join with a code</label>
-                            <div className="flex gap-2">
-                                 <div className="relative flex-grow">
-                                    <KeyRound size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/>
-                                    <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="Enter code"
-                                        className="w-full bg-slate-700/80 border border-slate-600 rounded-lg py-3 pl-10 pr-4 text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                    />
-                                </div>
-                                <button onClick={handleJoinWithCode} className="px-5 py-3 bg-slate-600 text-white font-semibold rounded-lg hover:bg-slate-500 transition-colors disabled:opacity-50" disabled={!joinCode.trim()}>Join</button>
-                            </div>
-                        </div>
-
-                    </motion.div>
-                )}
-                {(view === 'startNow' || view === 'schedule') && (
-                    <MeetingDetailsForm
-                        isScheduling={view === 'schedule'} onSubmit={handleFormSubmit} setView={setView}
-                        formValues={formValues} handleInputChange={handleInputChange} handleDateChange={handleDateChange}
-                        isLoading={isLoading}
-                    />
-                )}
-            </AnimatePresence>
-        </div>
-    );
-};
-
-const StatCard = ({ title, value, icon: Icon, color }) => (
-    <div className="stat-card bg-gradient-to-br from-slate-800/80 to-slate-900/60 backdrop-blur-sm p-4 rounded-xl border border-slate-700/60 flex items-center gap-4 transition-all duration-300 hover:border-blue-500/50 hover:shadow-xl hover:shadow-slate-900/50 hover:-translate-y-1">
-        <div className={`p-3 rounded-lg shadow-inner ${color}`}>
-            <Icon size={22} className="text-white" />
-        </div>
-        <div>
-            <p className="text-sm text-slate-400 font-medium">{title}</p>
-            <p className="text-2xl font-bold text-white">{value}</p>
-        </div>
-    </div>
-);
-
-const EMPTY_TOOLBAR = [];
-
-const MeetingPage = () => {
-    // ... (no changes in this component's state or functions)
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [activeToast, setActiveToast] = useState(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-    const [newMeetingLink, setNewMeetingLink] = useState('');
-    const [activeMeeting, setActiveMeeting] = useState(null);
-    const [currentUser, setCurrentUser] = useState(null);
-    const [userName, setUserName] = useState('Guest');
-    const [jitsiApi, setJitsiApi] = useState(null);
-    const [isMeetingSidebarOpen, setIsMeetingSidebarOpen] = useState(true);
-    const dashboardContainerRef = useRef(null);
-
-    useGSAP(() => {
-        if (!activeMeeting && dashboardContainerRef.current) {
-            gsap.from(dashboardContainerRef.current.children, {
-                y: 20, opacity: 0, duration: 0.5, ease: 'power3.out', stagger: 0.1,
-            });
-        }
-    }, { dependencies: [activeMeeting] });
-
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            setCurrentUser(user);
-            const storedUserName = localStorage.getItem('userName');
-            if (user) { setUserName(storedUserName || user.displayName || 'User'); } 
-            else { setUserName('Guest'); }
-        });
-        return () => unsubscribe();
-    }, []);
-
-    const showToast = (toastData) => { setActiveToast({ id: Date.now(), ...toastData }); };
-
-    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
-        setIsLoading(true);
-        if (!currentUser) {
-            showToast({ title: 'Auth Error', message: 'You must be logged in.', type: 'error' });
-            setIsLoading(false); return;
-        }
-        if (formData.hostName) localStorage.setItem('userName', formData.hostName);
-        try {
-            const meetingPayload = { ...formData, createdBy: currentUser.uid, createdAt: serverTimestamp() };
-            const docRef = await addDoc(collection(db, 'meetings'), meetingPayload);
-            const link = `${window.location.origin}/meeting/${docRef.id}`;
-            setNewMeetingLink(link);
-            showToast({ title: 'Success!', message: `Meeting ${scheduleOption === 'now' ? 'created' : 'scheduled'}!`, type: 'success' });
-            if (scheduleOption === 'now') {
-                setActiveMeeting({
-                    id: docRef.id, name: meetingPayload.name, displayName: meetingPayload.hostName,
-                    password: meetingPayload.password, startWithVideoMuted: meetingPayload.startWithVideoMuted,
-                    startWithAudioMuted: meetingPayload.startWithAudioMuted, prejoinPageEnabled: false,
-                });
-            } else {
-                setIsShareModalOpen(true);
-            }
-        } catch (error) {
-            console.error("Error creating meeting: ", error);
-            showToast({ title: 'Error', message: 'Failed to create meeting.', type: 'error' });
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleQuickStart = () => {
-        if (!currentUser) {
-             showToast({ title: 'Auth Error', message: 'You must be logged in to start a meeting.', type: 'error' });
-             return;
-        }
-        const quickStartData = {
-            name: `Instant Meeting - ${new Date("2025-08-02T00:44:01.000Z").toLocaleDateString()}`, purpose: 'Quick call', password: '',
-            isScheduled: false, scheduledFor: null, hostName: userName, startWithAudioMuted: false,
-            startWithVideoMuted: false, prejoinPageEnabled: false,
-        };
-        handleCreateMeeting(quickStartData, 'now');
-    };
-
-    const handleEndMeeting = useCallback(() => {
-        showToast({ title: 'Meeting Ended', message: 'You have left the meeting.', type: 'info' });
-        setActiveMeeting(null);
-        setJitsiApi(null);
-    }, []);
-    const handleApiReady = useCallback((api) => { setJitsiApi(api); }, []);
-
-    return (
-        <div className="flex h-screen relative z-10 overflow-hidden">
-            {activeMeeting ? (
-                <MeetingSidebar isOpen={isMeetingSidebarOpen} setIsOpen={setIsMeetingSidebarOpen} jitsiApi={jitsiApi} meetingLink={newMeetingLink} />
-            ) : (
-                <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
-            )}
-            <div className="fixed top-5 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5 w-full max-w-sm px-4 sm:px-0 z-[60]"><AnimatePresence>{activeToast && <Toast key={activeToast.id} toast={activeToast} onClose={() => setActiveToast(null)} />}</AnimatePresence></div>
-            <AnimatePresence>{isShareModalOpen && <ShareModal meetingLink={newMeetingLink} onClose={() => setIsShareModalOpen(false)} />}</AnimatePresence>
-            <div className="flex-1 flex flex-col h-screen relative">
-                 {activeMeeting && !isMeetingSidebarOpen && (
-                     <button onClick={() => setIsMeetingSidebarOpen(true)} className="absolute top-4 left-4 z-20 p-2 bg-slate-700/50 rounded-lg text-white hover:bg-slate-600" title="Open Sidebar">
-                         <PanelLeftOpen size={20} />
-                     </button>
-                 )}
-                <main className={`flex-1 flex flex-col h-full transition-all duration-300 ${activeMeeting ? 'p-0' : 'p-4 sm:p-6'}`}>
-                    <AnimatePresence mode="wait">
-                        {activeMeeting ? (
-                            <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-900 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
-                                <div className="flex-grow w-full h-0 min-h-[75vh]">
-                                    <JitsiMeet
-                                        domain="meet.in8.com" roomName={activeMeeting.id} displayName={activeMeeting.displayName || userName}
-                                        password={activeMeeting.password} onMeetingEnd={handleEndMeeting} onApiReady={handleApiReady}
-                                        startWithVideoMuted={activeMeeting.startWithVideoMuted} startWithAudioMuted={activeMeeting.startWithAudioMuted}
-                                        prejoinPageEnabled={activeMeeting.prejoinPageEnabled} toolbarButtons={EMPTY_TOOLBAR}
-                                    />
-                                </div>
-                                {jitsiApi && ( <CustomControls jitsiApi={jitsiApi} onHangup={handleEndMeeting} /> )}
-                            </motion.div>
-                        ) : (
-                            <div key="dashboard-view" ref={dashboardContainerRef} className="h-full flex flex-col gap-6">
-                                <div className="dashboard-header">
-                                    <h1 className="text-3xl font-bold text-white">Meeting Dashboard</h1>
-                                    <p className="text-slate-400 mt-1">Welcome back, {userName}!</p>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-                                    <StatCard title="Meetings Attended" value="28" icon={Presentation} color="bg-blue-500" />
-                                    <StatCard title="Total Time" value="12h 45m" icon={Timer} color="bg-purple-500" />
-                                    <StatCard title="Recordings Saved" value="7" icon={HardDriveDownload} color="bg-green-500" />
-                                    <StatCard title="Upcoming" value="3" icon={CalendarClock} color="bg-orange-500" />
-                                </div>
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow min-h-0">
-                                    <div className="lg:col-span-2 min-h-0">
-                                        <CreateMeeting onSubmit={handleCreateMeeting} isLoading={isLoading} initialUserName={userName} />
-                                    </div>
-                                    <div className="lg:col-span-1 min-h-0">
-                                        <InfoPanel onQuickStart={handleQuickStart} />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </AnimatePresence>
-                </main>
+        <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
+            <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md text-center">
+                <h1 className="text-3xl font-bold mb-2">Meeting Setup</h1>
+                <p className="text-gray-400 mb-6">Apni details enter karke meeting join karein.</p>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="displayName" className="block text-left text-sm font-medium text-gray-300 mb-1">Aapka Naam</label>
+                        <input
+                            type="text"
+                            id="displayName"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            placeholder="Jaise, 'Rahul'"
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="roomName" className="block text-left text-sm font-medium text-gray-300 mb-1">Room Ka Naam</label>
+                        <input
+                            type="text"
+                            id="roomName"
+                            value={roomName}
+                            onChange={(e) => setRoomName(e.target.value)}
+                            placeholder="Jaise, 'team-discussion'"
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="jwt" className="block text-left text-sm font-medium text-gray-300 mb-1">Moderator Token (JWT - Optional)</label>
+                        <input
+                            type="text"
+                            id="jwt"
+                            value={jwt}
+                            onChange={(e) => setJwt(e.target.value)}
+                            placeholder="Agar aap moderator hain to token enter karein"
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                         <p className="text-xs text-gray-500 mt-1 text-left">Yeh field secure Jitsi setups ke liye hai jahan moderator ki zaroorat hoti hai.</p>
+                    </div>
+                    <button type="submit" className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 shadow-lg">
+                        Meeting Join Karein
+                    </button>
+                </form>
             </div>
         </div>
     );
 };
 
-export default function MeetingPageContainer() {
+// 2. Toolbar Component: Niche ke control buttons
+const Toolbar = ({ api, onToggleChat, onToggleParticipants, onHangup, isMicMuted, isCamMuted, isSharingScreen }) => {
     return (
-        <div className="relative min-h-screen bg-slate-900 text-white font-sans">
-            <AnimatedBackground />
-            <MeetingPage />
+        <div className="bg-gray-900 bg-opacity-50 backdrop-blur-md p-4 flex justify-center items-center space-x-3 md:space-x-4">
+            {/* Mic Button */}
+            <button onClick={() => api.executeCommand('toggleAudio')} title="Mute/Unmute Mic" className={`control-btn p-3 rounded-full ${isMicMuted ? 'bg-red-600' : 'bg-gray-800'}`}>
+                {isMicMuted ? <Icon path="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z M5 5l14 14" /> : <Icon path="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />}
+            </button>
+            {/* Camera Button */}
+            <button onClick={() => api.executeCommand('toggleVideo')} title="Start/Stop Camera" className={`control-btn p-3 rounded-full ${isCamMuted ? 'bg-red-600' : 'bg-gray-800'}`}>
+                 {isCamMuted ? <Icon path="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z M1 1l22 22" /> : <Icon path="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />}
+            </button>
+            {/* Screen Share Button */}
+            <button onClick={() => api.executeCommand('toggleShareScreen')} title="Share Screen" className={`control-btn p-3 rounded-full ${isSharingScreen ? 'bg-indigo-600' : 'bg-gray-800'}`}>
+                <Icon path="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </button>
+            {/* Chat Button */}
+            <button onClick={onToggleChat} title="Toggle Chat" className="control-btn bg-gray-800 p-3 rounded-full">
+                <Icon path="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </button>
+            {/* Participants Button */}
+            <button onClick={onToggleParticipants} title="Toggle Participants" className="control-btn bg-gray-800 p-3 rounded-full">
+                <Icon path="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </button>
+            {/* Hangup Button */}
+            <button onClick={onHangup} title="Leave Meeting" className="control-btn bg-red-600 hover:bg-red-700 text-white p-3 rounded-full">
+                <Icon path="M16 8l2-2m0 0l2 2m-2-2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h8" />
+            </button>
         </div>
-    );}
+    );
+};
+
+// 3. Sidebar Component: Chat aur Participants ke liye
+const Sidebar = ({ api, isOpen, onClose, type, participants, chatMessages }) => {
+    const [chatInput, setChatInput] = useState('');
+
+    const handleSendMessage = () => {
+        if (chatInput.trim() && api) {
+            api.executeCommand('sendChatMessage', chatInput);
+            setChatInput('');
+        }
+    };
+
+    const title = type === 'chat' ? 'Chat' : 'Participants';
+
+    return (
+        <div className={`absolute top-0 right-0 h-full w-full max-w-sm bg-gray-900 bg-opacity-90 backdrop-blur-sm shadow-2xl transform transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            <div className="p-4 flex flex-col h-full">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold">{title}</h2>
+                    <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-700">
+                        <Icon path="M6 18L18 6M6 6l12 12" />
+                    </button>
+                </div>
+                <div className="flex-grow overflow-y-auto">
+                    {type === 'participants' && (
+                        <ul className="space-y-3">
+                            {participants.map(p => (
+                                <li key={p.id} className="flex items-center space-x-3">
+                                    <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center font-bold text-sm">{p.name.charAt(0).toUpperCase()}</div>
+                                    <span>{p.name} {p.isLocal ? '(Aap)' : ''}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                    {type === 'chat' && (
+                         <ul className="space-y-4">
+                            {chatMessages.map((msg, index) => (
+                                <li key={index} className={`flex flex-col ${msg.isLocal ? 'items-end' : 'items-start'}`}>
+                                    <div className={`rounded-lg px-3 py-2 max-w-xs ${msg.isLocal ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                                        {!msg.isLocal && <div className="text-xs text-gray-400 font-bold mb-1">{msg.senderName}</div>}
+                                        <p className="text-sm">{msg.message}</p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+                {type === 'chat' && (
+                    <div className="mt-4">
+                        <input
+                            type="text"
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2"
+                            placeholder="Message likhein..."
+                        />
+                        <button onClick={handleSendMessage} className="w-full mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg">
+                            Send
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+// 4. MeetingRoom Component: Main meeting screen
+const MeetingRoom = ({ roomName, displayName, jwt, onLeave }) => {
+    const jitsiContainerRef = useRef(null);
+    const [api, setApi] = useState(null);
+    
+    // UI states
+    const [isMicMuted, setIsMicMuted] = useState(false);
+    const [isCamMuted, setIsCamMuted] = useState(false);
+    const [isSharingScreen, setIsSharingScreen] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [sidebarType, setSidebarType] = useState('participants'); // 'chat' or 'participants'
+    
+    // Data states
+    const [participants, setParticipants] = useState([]);
+    const [chatMessages, setChatMessages] = useState([]);
+
+    const handleHangup = useCallback(() => {
+        if (api) {
+            api.dispose();
+        }
+        onLeave();
+    }, [api, onLeave]);
+
+    // Jitsi IFrame ko initialize karna
+    useEffect(() => {
+        if (!jitsiContainerRef.current || !window.JitsiMeetExternalAPI) return;
+
+        const domain = 'meet.jit.si';
+        const options = {
+            roomName: roomName,
+            width: '100%',
+            height: '100%',
+            parentNode: jitsiContainerRef.current,
+            configOverwrite: {
+                startWithAudioMuted: false,
+                startWithVideoMuted: false,
+                prejoinPageEnabled: false,
+            },
+            interfaceConfigOverwrite: {
+                // Jitsi ke default UI elements ko hide karna
+                TOOLBAR_BUTTONS: [],
+                SETTINGS_SECTIONS: [],
+                SHOW_CHROME_EXTENSION_BANNER: false,
+                DISABLE_VIDEO_BACKGROUND: true,
+            },
+            userInfo: {
+                displayName: displayName
+            }
+        };
+
+        // Agar JWT hai to use options mein add karein
+        if (jwt) {
+            options.jwt = jwt;
+        }
+
+        const jitsiApi = new window.JitsiMeetExternalAPI(domain, options);
+        setApi(jitsiApi);
+
+        // Event listeners ko setup karna
+        jitsiApi.addEventListener('videoConferenceJoined', () => {
+            console.log('Local user joined');
+            jitsiApi.executeCommand('displayName', displayName);
+            
+            const localId = jitsiApi.myUserId();
+            const initialParticipants = jitsiApi.getParticipantsInfo().map(p => ({
+                id: p.participantId,
+                name: p.displayName,
+                isLocal: p.participantId === localId,
+            }));
+             // Ensure local user is in the list
+            if (!initialParticipants.some(p => p.id === localId)) {
+                initialParticipants.push({ id: localId, name: displayName, isLocal: true });
+            }
+            setParticipants(initialParticipants);
+        });
+
+        jitsiApi.addEventListener('participantJoined', (participant) => {
+            console.log('Participant joined', participant);
+            setParticipants(prev => [...prev, { id: participant.id, name: participant.displayName, isLocal: false }]);
+        });
+
+        jitsiApi.addEventListener('participantLeft', (participant) => {
+            console.log('Participant left', participant);
+            setParticipants(prev => prev.filter(p => p.id !== participant.id));
+        });
+
+        jitsiApi.addEventListener('audioMuteStatusChanged', (event) => setIsMicMuted(event.muted));
+        jitsiApi.addEventListener('videoMuteStatusChanged', (event) => setIsCamMuted(event.muted));
+        jitsiApi.addEventListener('screenSharingStatusChanged', (event) => setIsSharingScreen(event.on));
+
+        jitsiApi.addEventListener('incomingMessage', (message) => {
+             setChatMessages(prev => [...prev, {
+                senderId: message.from,
+                senderName: jitsiApi.getParticipantsInfo().find(p => p.participantId === message.from)?.displayName || 'Unknown',
+                message: message.message,
+                isLocal: false
+            }]);
+        });
+        
+        jitsiApi.addEventListener('outgoingMessage', (message) => {
+            setChatMessages(prev => [...prev, {
+                senderId: jitsiApi.myUserId(),
+                senderName: displayName,
+                message: message.message,
+                isLocal: true
+            }]);
+        });
+        
+        // Cleanup function
+        return () => {
+            console.log('Disposing Jitsi API');
+            jitsiApi?.dispose();
+        };
+    }, [roomName, displayName, jwt]); // jwt ko dependency array mein add karein
+
+    const toggleSidebar = (type) => {
+        if (isSidebarOpen && sidebarType === type) {
+            setIsSidebarOpen(false);
+        } else {
+            setSidebarType(type);
+            setIsSidebarOpen(true);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-screen bg-black">
+            <div className="flex-grow relative">
+                <div ref={jitsiContainerRef} className="w-full h-full" />
+                <Sidebar 
+                    api={api}
+                    isOpen={isSidebarOpen} 
+                    onClose={() => setIsSidebarOpen(false)} 
+                    type={sidebarType}
+                    participants={participants}
+                    chatMessages={chatMessages}
+                />
+            </div>
+            {api && (
+                <Toolbar
+                    api={api}
+                    onHangup={handleHangup}
+                    onToggleChat={() => toggleSidebar('chat')}
+                    onToggleParticipants={() => toggleSidebar('participants')}
+                    isMicMuted={isMicMuted}
+                    isCamMuted={isCamMuted}
+                    isSharingScreen={isSharingScreen}
+                />
+            )}
+        </div>
+    );
+};
+
+// 5. Main App Component
+export default function App() {
+    const [meetingDetails, setMeetingDetails] = useState(null);
+
+    // Ye function Jitsi script ko dynamically load karega
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://meet.jit.si/external_api.js';
+        script.async = true;
+        document.body.appendChild(script);
+
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, []);
+
+    const handleJoinMeeting = (roomName, displayName, jwt) => {
+        setMeetingDetails({ roomName, displayName, jwt });
+    };
+
+    const handleLeaveMeeting = () => {
+        setMeetingDetails(null);
+    };
+
+    return (
+        <div className="App">
+            {meetingDetails ? (
+                <MeetingRoom
+                    roomName={meetingDetails.roomName}
+                    displayName={meetingDetails.displayName}
+                    jwt={meetingDetails.jwt}
+                    onLeave={handleLeaveMeeting}
+                />
+            ) : (
+                <Lobby onJoinMeeting={handleJoinMeeting} />
+            )}
+        </div>
+    );
+}

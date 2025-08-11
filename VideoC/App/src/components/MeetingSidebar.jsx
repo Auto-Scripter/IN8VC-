@@ -24,7 +24,10 @@ const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
 );
 
 // --- Helper: Participants Panel ---
-const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
+// In NEW_MeetingSidebar.js
+
+// ❗️ REPLACE your entire ParticipantsPanel component with this correct version ❗️
+const ParticipantsPanel = ({ participants, isHost, onKick, onMuteAll, onAskToUnmute }) => {
     const avatarColors = [
         'from-cyan-500 to-blue-600', 'from-emerald-500 to-green-600',
         'from-purple-500 to-indigo-600', 'from-amber-500 to-orange-600',
@@ -45,9 +48,21 @@ const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="p-1"
         >
-            <h3 className="text-white font-semibold text-sm px-2 mb-2">
-                In Meeting ({participants.length})
-            </h3>
+            <div className="flex justify-between items-center px-2 mb-2">
+                <h3 className="text-white font-semibold text-sm">
+                    In Meeting ({participants.length})
+                </h3>
+                {isHost && (
+                    <button 
+                        onClick={onMuteAll} 
+                        title="Mute Everyone"
+                        className="px-2 py-1 text-xs font-semibold text-slate-300 bg-slate-700/70 rounded-md hover:bg-slate-700 hover:text-white transition-colors"
+                    >
+                        Mute All
+                    </button>
+                )}
+            </div>
+            
             <div className="space-y-1 max-h-[calc(100vh-20rem)] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800/50 scrollbar-thumb-rounded-full">
                 {participants.map(p => (
                     <div key={p.participantId} className="group flex items-center gap-3 p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
@@ -56,18 +71,19 @@ const ParticipantsPanel = ({ participants, isHost, onMute, onKick }) => {
                         </div>
                         <span className="text-slate-200 text-sm truncate flex-grow">{p.formattedDisplayName}</span>
                         
-                        {/* Admin controls: show for host, but not for themselves */}
                         {isHost && !p.isLocal && (
                             <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                <button onClick={() => onMute(p.participantId)} title="Mute Participant" className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-600 rounded-full">
-                                    <MicOff size={14} />
-                                </button>
+                                {p.isAudioMuted && (
+                                    <button onClick={() => onAskToUnmute(p.participantId)} title="Ask to Unmute" className="p-1.5 text-cyan-400 hover:text-white hover:bg-slate-600 rounded-full">
+                                        <Mic size={14} />
+                                    </button>
+                                )}
+                                
                                 <button onClick={() => onKick(p.participantId)} title="Remove Participant" className="p-1.5 text-red-500 hover:text-white hover:bg-red-500 rounded-full">
                                     <UserX size={14} />
                                 </button>
                             </div>
                         )}
-                        {/* Admin Badge: show for the user who is the host */}
                         {p.isLocal && isHost && <Award size={16} title="You are the host" className="text-amber-400 flex-shrink-0 ml-auto" />}
                     </div>
                 ))}
@@ -178,20 +194,31 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     jitsiApi.addEventListener('participantJoined', updateParticipantList);
     jitsiApi.addEventListener('participantLeft', updateParticipantList);
     jitsiApi.addEventListener('displayNameChange', updateParticipantList);
+    jitsiApi.addEventListener('participantMuteStatusChanged', updateParticipantList);
+
 
     // Cleanup function
     return () => {
         jitsiApi.removeEventListener('participantJoined', updateParticipantList);
         jitsiApi.removeEventListener('participantLeft', updateParticipantList);
         jitsiApi.removeEventListener('displayNameChange', updateParticipantList);
+        jitsiApi.removeEventListener('participantMuteStatusChanged', updateParticipantList);
+
     };
 }, [jitsiApi, isHost, updateParticipantList]); // Dependencies
 
-    const handleMuteParticipant = (participantId) => jitsiApi?.executeCommand('mute', participantId);
     const handleKickParticipant = (participantId) => {
         if (window.confirm("Are you sure you want to remove this participant?")) {
             jitsiApi?.executeCommand('kickParticipant', participantId);
         }
+    };
+    const handleMuteAll = () => {
+        // This command mutes everyone except the person who sends it (the host).
+        jitsiApi?.executeCommand('muteEveryone');
+    };
+
+    const handleAskToUnmute = (participantId) => {
+        jitsiApi?.executeCommand('askToUnmute', participantId);
     };
     
     const handleTogglePanel = (panelName) => {
@@ -232,11 +259,12 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             <div className="flex-grow overflow-hidden">
                 <AnimatePresence mode="wait">
                     {activePanel === 'participants' && (
-                        <ParticipantsPanel 
+                         <ParticipantsPanel 
                             participants={participants}
                             isHost={isHost}
-                            onMute={handleMuteParticipant}
                             onKick={handleKickParticipant}
+                            onMuteAll={handleMuteAll} 
+                            onAskToUnmute={handleAskToUnmute}
                         />
                     )}
                     {activePanel === 'share' && (

@@ -13,9 +13,7 @@ const JitsiMeet = React.memo(({
     startWithAudioMuted,
     prejoinPageEnabled,
     toolbarButtons,
-    // highlight-start
-    noiseSuppressionEnabled, // New prop to control noise suppression
-    // highlight-end
+    noiseSuppressionEnabled,
     jwt,
 }) => {
     const jitsiContainerRef = useRef(null);
@@ -51,12 +49,9 @@ const JitsiMeet = React.memo(({
                     startWithVideoMuted,
                     startWithAudioMuted,
                     prejoinPageEnabled,
-                    // highlight-start
-                    // Add this object to enable the feature
                     noiseSuppression: {
                         enabled: noiseSuppressionEnabled,
                     },
-                    // highlight-end
                 },
                 interfaceConfigOverwrite: {
                     TOOLBAR_BUTTONS: toolbarButtons,
@@ -122,9 +117,7 @@ JitsiMeet.propTypes = {
     startWithAudioMuted: PropTypes.bool,
     prejoinPageEnabled: PropTypes.bool,
     toolbarButtons: PropTypes.arrayOf(PropTypes.string),
-    // highlight-start
-    noiseSuppressionEnabled: PropTypes.bool, // New propType
-    // highlight-end
+    noiseSuppressionEnabled: PropTypes.bool,
     jwt: PropTypes.string,
 };
 
