@@ -129,8 +129,10 @@ const AuthForm = () => {
         
         const isAdmin = await isAdminUser(user.email);
         if (isAdmin) {
+            localStorage.setItem('role', 'admin');
             handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
         } else {
+            localStorage.setItem('role', 'user');
             handleAuthSuccess('Login Successful! Redirecting...', '/home');
         }
 
@@ -163,6 +165,7 @@ const AuthForm = () => {
         localStorage.setItem('authToken', token);
         localStorage.setItem('userName', userName);
         localStorage.setItem('userEmail', user.email);
+        localStorage.setItem('role', 'user');
         console.log("Auth Token:", token);
         console.log("User Name:", userName);
         console.log("User Email:", user.email);
@@ -208,8 +211,10 @@ const AuthForm = () => {
 
       const isAdmin = await isAdminUser(user.email);
       if (isAdmin) {
+          localStorage.setItem('role', 'admin');
           handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
       } else {
+          localStorage.setItem('role', 'user');
           handleAuthSuccess('Login Successful! Redirecting...', '/home');
       }
 

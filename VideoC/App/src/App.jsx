@@ -51,7 +51,7 @@ const App = () => {
         <Route 
           path="/dashboard" 
           element={
-            <ProtectedRoute>
+            <ProtectedRoute requiredRole="admin" fallbackTo="/home">
               <Dashboard />
             </ProtectedRoute>
           } 

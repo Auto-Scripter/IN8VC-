@@ -19,7 +19,7 @@ import JitsiMeet from '../components/JitsiMeet';
 import CustomControls from '../components/CustomControls';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import MeetingSidebar from '../components/MeetingSidebar';
 
 
@@ -427,9 +427,11 @@ const MeetingPage = () => {
     const [isMeetingSidebarOpen, setIsMeetingSidebarOpen] = useState(true);
     const dashboardContainerRef = useRef(null);
     const [isJitsiLoading, setIsJitsiLoading] = useState(false);
+    const [whiteboardOpen, setWhiteboardOpen] = useState(false);
 
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const inactivityTimer = useRef(null);
+    const [hostParticipantId, setHostParticipantId] = useState(null);
 
     useGSAP(() => {
         if (!activeMeeting && dashboardContainerRef.current) {
@@ -499,7 +501,19 @@ const handleApiReady = useCallback((api) => {
     setJitsiApi(api);
     // +++ STOP the Jitsi loader HERE +++
     setIsJitsiLoading(false);
-}, []);
+    try {
+        const onJoined = async (e) => {
+            if (!activeMeeting?.id) return;
+            // Persist the host's participant ID so everyone can badge correctly
+            const localIsHost = !!activeMeeting?.isHost;
+            if (localIsHost && e?.id) {
+                setHostParticipantId(e.id);
+                try { await updateDoc(doc(db, 'meetings', activeMeeting.id), { hostParticipantId: e.id }); } catch (_) {}
+            }
+        };
+        api.addEventListener('videoConferenceJoined', onJoined);
+    } catch (_) {}
+}, [activeMeeting]);
 
 
     const showControlsAndResetTimer = useCallback(() => {
@@ -522,6 +536,37 @@ const handleApiReady = useCallback((api) => {
             clearTimeout(inactivityTimer.current);
         };
     }, [activeMeeting, showControlsAndResetTimer]);
+
+    // Synchronize whiteboard via Firestore: when the doc's whiteboardOpen changes,
+    // toggle the Jitsi whiteboard to match on every client
+    useEffect(() => {
+        if (!activeMeeting?.id) return;
+        const meetingRef = doc(db, 'meetings', activeMeeting.id);
+        const unsub = onSnapshot(meetingRef, (snap) => {
+            const data = snap.data() || {};
+            const targetOpen = !!data.whiteboardOpen;
+            setWhiteboardOpen((prev) => {
+                if (prev !== targetOpen) {
+                    if (jitsiApi) {
+                        jitsiApi.executeCommand('toggleWhiteboard');
+                    }
+                }
+                return targetOpen;
+            });
+        });
+        return () => unsub();
+    }, [activeMeeting?.id, jitsiApi]);
+
+    // Host handler to flip the Firestore flag; all clients react via onSnapshot
+    const handleToggleWhiteboard = useCallback(async () => {
+        if (!activeMeeting?.id) return;
+        try {
+            const meetingRef = doc(db, 'meetings', activeMeeting.id);
+            await updateDoc(meetingRef, { whiteboardOpen: !whiteboardOpen });
+        } catch (e) {
+            console.error('Failed to toggle whiteboard flag:', e);
+        }
+    }, [activeMeeting?.id, whiteboardOpen]);
 
 
     const showToast = (toastData) => { setActiveToast({ id: Date.now(), ...toastData }); };
@@ -655,6 +700,8 @@ const handleApiReady = useCallback((api) => {
         resumeTimer={showControlsAndResetTimer}
         isHost={activeMeeting.isHost}
         showToast={showToast}
+        isWhiteboardOpen={whiteboardOpen}
+        onToggleWhiteboard={handleToggleWhiteboard}
     /> 
 )}
                             </motion.div>

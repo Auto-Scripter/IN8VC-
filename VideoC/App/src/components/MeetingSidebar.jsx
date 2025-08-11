@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, MessageSquare, Share2, PanelLeftClose, Radio, Copy, Check, Mail, Award, MicOff, UserX } from 'lucide-react';
+import { Users, MessageSquare, Share2, PanelLeftClose, Radio, Copy, Check, Mail, Award, MicOff, UserX, Mic } from 'lucide-react';
 
 // --- Helper: Sidebar Navigation Button ---
 const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
@@ -27,7 +27,7 @@ const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
 // In NEW_MeetingSidebar.js
 
 // ❗️ REPLACE your entire ParticipantsPanel component with this correct version ❗️
-const ParticipantsPanel = ({ participants, isHost, onKick, onMuteAll, onAskToUnmute }) => {
+const ParticipantsPanel = ({ participants, isHost, onKick, onMuteAll, onAskToUnmute, onRequestMute }) => {
     const avatarColors = [
         'from-cyan-500 to-blue-600', 'from-emerald-500 to-green-600',
         'from-purple-500 to-indigo-600', 'from-amber-500 to-orange-600',
@@ -70,21 +70,27 @@ const ParticipantsPanel = ({ participants, isHost, onKick, onMuteAll, onAskToUnm
                             {p.formattedDisplayName?.substring(0, 2).toUpperCase()}
                         </div>
                         <span className="text-slate-200 text-sm truncate flex-grow">{p.formattedDisplayName}</span>
-                        
-                        {isHost && !p.isLocal && (
-                            <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                {p.isAudioMuted && (
-                                    <button onClick={() => onAskToUnmute(p.participantId)} title="Ask to Unmute" className="p-1.5 text-cyan-400 hover:text-white hover:bg-slate-600 rounded-full">
-                                        <Mic size={14} />
+                        <div className="ml-auto flex items-center gap-1">
+                            {isHost && !p.isLocal && (
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    {p.isAudioMuted ? (
+                                        <button onClick={() => onAskToUnmute(p.participantId)} title="Ask to Unmute" className="p-1.5 text-cyan-400 hover:text-white hover:bg-slate-600 rounded-full">
+                                            <Mic size={14} />
+                                        </button>
+                                    ) : (
+                                        <button onClick={() => onRequestMute && onRequestMute(p.participantId)} title="Mute Participant" className="p-1.5 text-amber-500 hover:text-white hover:bg-amber-500 rounded-full">
+                                            <MicOff size={14} />
+                                        </button>
+                                    )}
+                                    <button onClick={() => onKick(p)} title="Remove Participant" className="p-1.5 text-red-500 hover:text-white hover:bg-red-500 rounded-full">
+                                        <UserX size={14} />
                                     </button>
-                                )}
-                                
-                                <button onClick={() => onKick(p.participantId)} title="Remove Participant" className="p-1.5 text-red-500 hover:text-white hover:bg-red-500 rounded-full">
-                                    <UserX size={14} />
-                                </button>
-                            </div>
-                        )}
-                        {p.isLocal && isHost && <Award size={16} title="You are the host" className="text-amber-400 flex-shrink-0 ml-auto" />}
+                                </div>
+                            )}
+                            {p.isModerator && (
+                                <Award size={16} title={p.isLocal ? 'You are the host' : 'Host'} className="text-amber-400 flex-shrink-0" />
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>
@@ -136,10 +142,16 @@ const SharePanel = ({ meetingLink, handleCopy, copiedItem }) => {
     )
 };
 
-const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, localDisplayName}) => {
+const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, localDisplayName, hostParticipantId }) => {
     const [activePanel, setActivePanel] = useState('participants');
     const [copiedItem, setCopiedItem] = useState(null);
     const [participants, setParticipants] = useState([]);
+    const [localParticipantId, setLocalParticipantId] = useState(null);
+    const [moderatorIds, setModeratorIds] = useState(new Set());
+    const [confirmKick, setConfirmKick] = useState(null); // participant object to confirm removal
+    const [confirmMute, setConfirmMute] = useState(null); // participant object to confirm mute
+    const updateTimerRef = useRef(null);
+    const pollRef = useRef(null);
     
     const sidebarRef = useRef(null);
     const tl = useRef();
@@ -155,32 +167,52 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
         if (!jitsiApi) {
             return;
         }
+        const rawList = Array.isArray(jitsiApi.getParticipantsInfo()) ? jitsiApi.getParticipantsInfo() : [];
+        // Deduplicate by participantId to avoid doubles
+        const dedupedMap = new Map();
+        for (const p of rawList) {
+            if (!dedupedMap.has(p.participantId)) dedupedMap.set(p.participantId, p);
+        }
+        const deduped = Array.from(dedupedMap.values());
 
-        const allParticipants = jitsiApi.getParticipantsInfo();
         let finalList = [];
-
-        // Use the new localDisplayName prop to filter the list
-        if (isHost && localDisplayName) {
-            // Filter out any participant whose name matches the one passed in props
-            const otherParticipants = allParticipants
-                .filter(p => p.displayName !== localDisplayName)
-                .map(p => ({ ...p, isLocal: false }));
-
-            // Create the special "Admin" entry
+        if (isHost) {
+            let effectiveLocalId = localParticipantId;
+            if (!effectiveLocalId) {
+                const byName = deduped.find(p => p.formattedDisplayName === localDisplayName || p.displayName === localDisplayName);
+                if (byName) effectiveLocalId = byName.participantId;
+            }
+            const local = deduped.find(p => p.participantId === effectiveLocalId) || null;
+            const others = deduped
+                .filter(p => p.participantId !== effectiveLocalId)
+                .map(p => ({
+                    ...p,
+                    isLocal: false,
+                    isModerator: moderatorIds.has(p.participantId) || p.isModerator || p.role === 'moderator' || (hostParticipantId && p.participantId === hostParticipantId),
+                }));
             const adminEntry = {
                 participantId: 'local-admin-host',
-                formattedDisplayName: 'Admin (You)',
+                formattedDisplayName: (local?.formattedDisplayName || local?.displayName || localDisplayName || 'Admin') + ' (You)',
                 isLocal: true,
+                isModerator: true,
             };
-            
-            finalList = [adminEntry, ...otherParticipants];
+            finalList = [adminEntry, ...others];
         } else {
-            // Fallback for non-hosts or if the name isn't available
-            finalList = allParticipants.map(p => ({ ...p }));
+            finalList = deduped.map(p => ({
+                ...p,
+                isModerator: moderatorIds.has(p.participantId) || p.isModerator || p.role === 'moderator' || (hostParticipantId && p.participantId === hostParticipantId),
+            }));
         }
 
         setParticipants(finalList);
-    }, [jitsiApi, isHost, localDisplayName]);// The function now depends on isHost
+    }, [jitsiApi, isHost, localDisplayName, localParticipantId, moderatorIds, hostParticipantId]);// The function now depends on isHost
+
+   const scheduleUpdate = useCallback(() => {
+        if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+        updateTimerRef.current = setTimeout(() => {
+            updateParticipantList();
+        }, 150);
+   }, [updateParticipantList]);
 
    useEffect(() => {
     if (!jitsiApi) {
@@ -191,33 +223,65 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     updateParticipantList();
 
     // Set up listeners to handle future changes (people joining/leaving).
-    jitsiApi.addEventListener('participantJoined', updateParticipantList);
-    jitsiApi.addEventListener('participantLeft', updateParticipantList);
-    jitsiApi.addEventListener('displayNameChange', updateParticipantList);
-    jitsiApi.addEventListener('participantMuteStatusChanged', updateParticipantList);
+    const handleConferenceJoined = (e) => {
+        if (e && e.id) setLocalParticipantId(e.id);
+        scheduleUpdate();
+    };
+    const handleChanged = () => scheduleUpdate();
+    const handleRoleChanged = ({ id, role }) => {
+        setModeratorIds(prev => {
+            const next = new Set(prev);
+            if (role === 'moderator') next.add(id); else next.delete(id);
+            return next;
+        });
+        scheduleUpdate();
+    };
+    jitsiApi.addEventListener('participantJoined', handleChanged);
+    jitsiApi.addEventListener('participantLeft', handleChanged);
+    jitsiApi.addEventListener('displayNameChange', handleChanged);
+    jitsiApi.addEventListener('participantMuteStatusChanged', handleChanged);
+    jitsiApi.addEventListener('videoConferenceJoined', handleConferenceJoined);
+    jitsiApi.addEventListener('videoConferenceLeft', handleChanged);
+    jitsiApi.addEventListener('participantRoleChanged', handleRoleChanged);
 
 
     // Cleanup function
     return () => {
-        jitsiApi.removeEventListener('participantJoined', updateParticipantList);
-        jitsiApi.removeEventListener('participantLeft', updateParticipantList);
-        jitsiApi.removeEventListener('displayNameChange', updateParticipantList);
-        jitsiApi.removeEventListener('participantMuteStatusChanged', updateParticipantList);
+        jitsiApi.removeEventListener('participantJoined', handleChanged);
+        jitsiApi.removeEventListener('participantLeft', handleChanged);
+        jitsiApi.removeEventListener('displayNameChange', handleChanged);
+        jitsiApi.removeEventListener('participantMuteStatusChanged', handleChanged);
+        jitsiApi.removeEventListener('videoConferenceJoined', handleConferenceJoined);
+        jitsiApi.removeEventListener('videoConferenceLeft', handleChanged);
+        jitsiApi.removeEventListener('participantRoleChanged', handleRoleChanged);
+        if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
 
     };
-}, [jitsiApi, isHost, updateParticipantList]); // Dependencies
+}, [jitsiApi, isHost, updateParticipantList]); 
+
+   useEffect(() => {
+        if (!jitsiApi) return;
+        pollRef.current = setInterval(() => {
+            updateParticipantList();
+        }, 3000);
+        return () => {
+            if (pollRef.current) clearInterval(pollRef.current);
+        };
+   }, [jitsiApi, updateParticipantList]);
 
     const handleKickParticipant = (participantId) => {
-        if (window.confirm("Are you sure you want to remove this participant?")) {
-            jitsiApi?.executeCommand('kickParticipant', participantId);
-        }
+        setConfirmKick({ participantId });
     };
     const handleMuteAll = () => {
-        // This command mutes everyone except the person who sends it (the host).
         jitsiApi?.executeCommand('muteEveryone');
     };
 
     const handleAskToUnmute = (participantId) => {
+        jitsiApi?.executeCommand('askToUnmute', participantId);
+    };
+
+    // Force mute using askToUnmute command (works as a mute request)
+    const handleForceMute = (participantId) => {
         jitsiApi?.executeCommand('askToUnmute', participantId);
     };
     
@@ -265,6 +329,7 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                             onKick={handleKickParticipant}
                             onMuteAll={handleMuteAll} 
                             onAskToUnmute={handleAskToUnmute}
+                            onRequestMute={(participantId)=> setConfirmMute({ participantId })}
                         />
                     )}
                     {activePanel === 'share' && (
@@ -288,6 +353,62 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                     <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span></span><span>Connected & Secure</span>
                 </div>
             </div>
+            {/* Custom Kick Confirmation */}
+            <AnimatePresence>
+                {confirmKick && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4"
+                        onClick={() => setConfirmKick(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 10, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            exit={{ scale: 0.95, y: -10, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="w-full max-w-sm bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h4 className="text-lg font-semibold text-white mb-1">Remove participant?</h4>
+                            <p className="text-sm text-slate-300 mb-4">This participant will be disconnected from the meeting.</p>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={() => setConfirmKick(null)} className="px-4 py-2 rounded-md bg-slate-700 text-slate-200 hover:bg-slate-600">Cancel</button>
+                                <button onClick={() => { jitsiApi?.executeCommand('kickParticipant', confirmKick.participantId); setConfirmKick(null); }} className="px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-500">Remove</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            {/* Custom Mute Confirmation */}
+            <AnimatePresence>
+                {confirmMute && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4"
+                        onClick={() => setConfirmMute(null)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, y: 10, opacity: 0 }}
+                            animate={{ scale: 1, y: 0, opacity: 1 }}
+                            exit={{ scale: 0.95, y: -10, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="w-full max-w-sm bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h4 className="text-lg font-semibold text-white mb-1">Mute participant?</h4>
+                            <p className="text-sm text-slate-300 mb-4">They will be muted immediately.</p>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={() => setConfirmMute(null)} className="px-4 py-2 rounded-md bg-slate-700 text-slate-200 hover:bg-slate-600">Cancel</button>
+                                <button onClick={() => { handleForceMute(confirmMute.participantId); setConfirmMute(null); }} className="px-4 py-2 rounded-md bg-amber-500 text-white hover:bg-amber-400">Mute</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </motion.aside>
     );
 };

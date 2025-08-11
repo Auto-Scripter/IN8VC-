@@ -121,15 +121,19 @@ const MenuItem = ({ icon: Icon, label, onClick }) => (
     </button>
 );
 
-const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer, isHost,  showToast }) => {
+const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer, isHost,  showToast, isWhiteboardOpen, onToggleWhiteboard }) => {
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
     const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
     const [isShareVideoModalOpen, setIsShareVideoModalOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
+    const [recordingMode, setRecordingMode] = useState(null);
+    const [recordingSessionId, setRecordingSessionId] = useState(null);
+    const [streamSessionId, setStreamSessionId] = useState(null);
     const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
     const [isVideoSharing, setIsVideoSharing] = useState(false);
+    // Whiteboard state now comes from parent (Firestore-synced)
 
     const menuRef = useRef(null);
     const containerRef = useRef(null);
@@ -165,21 +169,43 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
 
         const handleAudioMute = ({ muted }) => setIsAudioMuted(muted);
         const handleVideoMute = ({ muted }) => setIsVideoMuted(muted);
-        const handleStreamingStatus = ({ on }) => setIsStreaming(on);
-        const handleRecordingStatus = ({ on }) => setIsRecording(on);
+        // Jitsi event for live streaming
+        const handleStreamingStatus = ({ on, sessionID }) => {
+            setIsStreaming(on);
+            setStreamSessionId(on ? sessionID || null : null);
+        };
+        // Jitsi event for file recording
+        const handleRecordingStatus = ({ on, mode, sessionID }) => {
+            setIsRecording(on);
+            setRecordingMode(on ? (mode || null) : null);
+            setRecordingSessionId(on ? (sessionID || null) : null);
+        };
+
+        // Remove endpoint messaging sync; handled by Firestore in parent
+        const handleEndpointTextMessage = () => {};
 
         jitsiApi.addEventListener('audioMuteStatusChanged', handleAudioMute);
         jitsiApi.addEventListener('videoMuteStatusChanged', handleVideoMute);
-        jitsiApi.addEventListener('streamStatusChanged', handleStreamingStatus);
+        // Correct event name for live streaming status
+        jitsiApi.addEventListener('liveStreamingStatusChanged', handleStreamingStatus);
         jitsiApi.addEventListener('recordingStatusChanged', handleRecordingStatus);
+        jitsiApi.addEventListener('endpointTextMessageReceived', handleEndpointTextMessage);
+        // Fallback for deployments using the old event name
+        jitsiApi.addEventListener('endpointTextMessage', handleEndpointTextMessage);
+
+        const handleParticipantJoined = () => {};
+        jitsiApi.addEventListener('participantJoined', handleParticipantJoined);
 
         return () => {
             jitsiApi.removeEventListener('audioMuteStatusChanged', handleAudioMute);
             jitsiApi.removeEventListener('videoMuteStatusChanged', handleVideoMute);
-            jitsiApi.removeEventListener('streamStatusChanged', handleStreamingStatus);
+            jitsiApi.removeEventListener('liveStreamingStatusChanged', handleStreamingStatus);
             jitsiApi.removeEventListener('recordingStatusChanged', handleRecordingStatus);
+            jitsiApi.removeEventListener('endpointTextMessageReceived', handleEndpointTextMessage);
+            jitsiApi.removeEventListener('endpointTextMessage', handleEndpointTextMessage);
+            jitsiApi.removeEventListener('participantJoined', handleParticipantJoined);
         };
-    }, [jitsiApi, showToast]);
+    }, [jitsiApi, showToast, isWhiteboardOpen]);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -200,8 +226,21 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const toggleVideo = () => jitsiApi?.executeCommand('toggleVideo');
     const toggleScreenShare = () => jitsiApi?.executeCommand('toggleShareScreen');
     const raiseHand = () => jitsiApi?.executeCommand('toggleRaiseHand');
-    const toggleRecording = () => jitsiApi?.executeCommand(isRecording ? 'stopRecording' : 'startRecording', { mode: 'file' });
-    const handleStopStream = () => jitsiApi?.executeCommand('stopRecording', { mode: 'stream' });
+    const toggleRecording = () => {
+        if (!jitsiApi) return;
+        if (isRecording) {
+            const modeToStop = recordingMode || 'file';
+            // Use string mode for compatibility with older External API versions
+            jitsiApi.executeCommand('stopRecording', modeToStop);
+        } else {
+            jitsiApi.executeCommand('startRecording', { mode: 'file' });
+        }
+    };
+    const handleStopStream = () => {
+        if (!jitsiApi) return;
+        // Use string mode for compatibility
+        jitsiApi.executeCommand('stopRecording', 'stream');
+    };
     const handleStartStream = (streamKey) => {
         jitsiApi?.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
         setIsStreamModalOpen(false);
@@ -230,7 +269,15 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     };
     
 
-    const handleToggleWhiteboard = () => executeCommandAndCloseMenu('toggleWhiteboard');
+    const handleToggleWhiteboard = () => {
+        setIsMoreMenuOpen(false);
+        onToggleWhiteboard && onToggleWhiteboard();
+    };
+    const handleToggleWhiteboardLocal = () => {
+        if (!jitsiApi) return;
+        jitsiApi.executeCommand('toggleWhiteboard');
+        setIsMoreMenuOpen(false);
+    };
     const handleToggleView = () => executeCommandAndCloseMenu('toggleTileView');
 
     return (
@@ -300,8 +347,20 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                                         <MenuItem icon={Youtube} label="Share a video" onClick={handleOpenShareModal} />
                                     )}
                                     
-                                    {isHost && (
-                                        <MenuItem icon={Paintbrush} label="Show Whiteboard" onClick={handleToggleWhiteboard} />
+                                    {isHost ? (
+                                        <MenuItem
+                                            icon={Paintbrush}
+                                            label={isWhiteboardOpen ? 'Hide Whiteboard (All)' : 'Show Whiteboard (All)'}
+                                            onClick={handleToggleWhiteboard}
+                                        />
+                                    ) : (
+                                        isWhiteboardOpen && (
+                                            <MenuItem
+                                                icon={Paintbrush}
+                                                label={"Hide Whiteboard"}
+                                                onClick={handleToggleWhiteboardLocal}
+                                            />
+                                        )
                                     )}
                                     
                                     <MenuItem icon={LayoutGrid} label="Toggle Tile View" onClick={handleToggleView} />
@@ -312,7 +371,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
 
                     <ControlButtonWithTooltip onClick={onHangup} tooltip="Leave Meeting" className="bg-red-600 text-white hover:bg-red-500">
                         <PhoneOff size={22} />
-                    </ControlButtonWithTooltip>
+                    </ControlButtonWithTooltip >
 
                 </div>
             </div>

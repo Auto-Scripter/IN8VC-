@@ -1,24 +1,35 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
-const ProtectedRoute = ({ children }) => {
+// Usage:
+// <ProtectedRoute>               -> requires auth only
+// <ProtectedRoute requiredRole="admin" fallbackTo="/home"> -> requires admin role
+const ProtectedRoute = ({ children, requiredRole, fallbackTo = '/home' }) => {
   const authToken = localStorage.getItem('authToken');
+  const userRole = localStorage.getItem('role');
   const location = useLocation();
 
   if (!authToken) {
-    // Agar token nahi hai, toh user ko login page par bhej dein
-    // Saath mein ek state message bhi bhejenge taaki login page par toast dikha sakein
-    return <Navigate 
-      to="/" 
-      replace 
-      state={{ 
-        from: location, 
-        message: "You must login to access this page." 
-      }} 
-    />;
+    return (
+      <Navigate
+        to="/"
+        replace
+        state={{ from: location, message: 'You must login to access this page.' }}
+      />
+    );
   }
 
-  // Agar token hai, toh jo bhi page access karna hai, use render karein
+  if (requiredRole && userRole !== requiredRole) {
+    // Logged in but not allowed for this role
+    return (
+      <Navigate
+        to={fallbackTo}
+        replace
+        state={{ from: location, message: 'You do not have permission to access this page.' }}
+      />
+    );
+  }
+
   return children;
 };
 
