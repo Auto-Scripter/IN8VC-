@@ -15,6 +15,7 @@ const JitsiMeet = React.memo(({
     toolbarButtons,
     noiseSuppressionEnabled,
     jwt,
+    showToast,
 }) => {
     const jitsiContainerRef = useRef(null);
     const apiRef = useRef(null);
@@ -32,9 +33,19 @@ const JitsiMeet = React.memo(({
         
         document.head.appendChild(script);
 
+        const failTimer = setTimeout(() => {
+            showToast && showToast({
+                title: 'Failed to load meeting',
+                message: 'The meeting could not be embedded. Check frame-ancestors/X-Frame-Options on the Jitsi domain.',
+                type: 'error',
+            });
+        }, 15000);
+
         script.onload = () => {
             if (!window.JitsiMeetExternalAPI) {
                 console.error("Jitsi API script not loaded.");
+                clearTimeout(failTimer);
+                showToast && showToast({ title: 'Load error', message: 'external_api.js did not initialize.', type: 'error' });
                 return;
             }
 
@@ -49,6 +60,7 @@ const JitsiMeet = React.memo(({
                     startWithVideoMuted,
                     startWithAudioMuted,
                     prejoinPageEnabled,
+                    disableInitialGUM: true,
                     noiseSuppression: {
                         enabled: noiseSuppressionEnabled,
                     },
@@ -58,10 +70,30 @@ const JitsiMeet = React.memo(({
                     SHOW_JITSI_WATERMARK: false,
                 },
             };
+            if (jwt) {
+                options.jwt = jwt;
+            }
             
-            apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options, jwt);
+            try {
+                apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options);
+            } catch (e) {
+                console.error('Failed to create JitsiMeetExternalAPI:', e);
+                showToast && showToast({ title: 'Embed blocked', message: 'The Jitsi server refused to be embedded. Check X-Frame-Options / CSP (frame-ancestors).', type: 'error' });
+                clearTimeout(failTimer);
+                return;
+            }
+
+            const onIframeReady = () => {
+                clearTimeout(failTimer);
+                if (onApiReady && typeof onApiReady === 'function') {
+                    onApiReady(apiRef.current);
+                }
+            };
+
+            apiRef.current.addEventListener('iframeReady', onIframeReady);
 
             apiRef.current.addEventListener('videoConferenceJoined', () => {
+                clearTimeout(failTimer);
                 if (onApiReady && typeof onApiReady === 'function') {
                     onApiReady(apiRef.current);
                 }
@@ -85,6 +117,7 @@ const JitsiMeet = React.memo(({
                 apiRef.current.dispose();
                 apiRef.current = null;
             }
+            clearTimeout(failTimer);
             if (document.head.contains(script)) {
                 document.head.removeChild(script);
             }
@@ -92,7 +125,7 @@ const JitsiMeet = React.memo(({
     }, [
         domain, roomName, displayName, password, onMeetingEnd, onApiReady,
         onRecordingStatusChanged, startWithVideoMuted, startWithAudioMuted, 
-        prejoinPageEnabled, toolbarButtons, jwt, noiseSuppressionEnabled // Add new prop to dependency array
+        prejoinPageEnabled, toolbarButtons, noiseSuppressionEnabled, jwt, showToast 
     ]);
 
     return (
@@ -104,7 +137,6 @@ const JitsiMeet = React.memo(({
     );
 });
 
-// Add the new prop to propTypes
 JitsiMeet.propTypes = {
     domain: PropTypes.string,
     roomName: PropTypes.string.isRequired,
@@ -119,9 +151,9 @@ JitsiMeet.propTypes = {
     toolbarButtons: PropTypes.arrayOf(PropTypes.string),
     noiseSuppressionEnabled: PropTypes.bool,
     jwt: PropTypes.string,
+    showToast: PropTypes.func,
 };
 
-// Add a default for the new prop
 JitsiMeet.defaultProps = {
     domain: 'meet.in8.com',
     password: '',
@@ -130,10 +162,8 @@ JitsiMeet.defaultProps = {
     startWithAudioMuted: false,
     prejoinPageEnabled: false,
     toolbarButtons: [],
-    // highlight-start
-    noiseSuppressionEnabled: true, // Enable by default
-    // highlight-end
-    jwt: undefined,
+     noiseSuppressionEnabled: true,
+     jwt: undefined,
 };
 
 export default JitsiMeet;

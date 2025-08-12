@@ -9,7 +9,7 @@ import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 
 // Assuming these are in the same directory or a sub-directory
-import StreamKeyModal from './StreamKeyModal';
+import LiveStreamModal from './LiveStreamModal';
 
 const ShareVideoModal = ({ onShare, onClose }) => {
     const [videoUrl, setVideoUrl] = useState('');
@@ -125,6 +125,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
     const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
+    const [isStartingStream, setIsStartingStream] = useState(false);
     const [isShareVideoModalOpen, setIsShareVideoModalOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -228,9 +229,13 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const raiseHand = () => jitsiApi?.executeCommand('toggleRaiseHand');
     const toggleRecording = () => {
         if (!jitsiApi) return;
+        // Block starting recording if currently live
+        if (!isRecording && isStreaming) {
+            showToast && showToast({ title: 'Action blocked', message: 'You cannot record while live streaming.', type: 'error' });
+            return;
+        }
         if (isRecording) {
             const modeToStop = recordingMode || 'file';
-            // Use string mode for compatibility with older External API versions
             jitsiApi.executeCommand('stopRecording', modeToStop);
         } else {
             jitsiApi.executeCommand('startRecording', { mode: 'file' });
@@ -241,9 +246,27 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
         // Use string mode for compatibility
         jitsiApi.executeCommand('stopRecording', 'stream');
     };
-    const handleStartStream = (streamKey) => {
-        jitsiApi?.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
-        setIsStreamModalOpen(false);
+    const handleStartStream = async ({ platform, streamKey, rtmpUrl }) => {
+        if (!jitsiApi) return;
+        // Block starting live if currently recording
+        if (isRecording) {
+            showToast && showToast({ title: 'Action blocked', message: 'You cannot go live while recording.', type: 'error' });
+            return;
+        }
+        try {
+            setIsStartingStream(true);
+            // Jitsi External API supports two styles depending on deployment:
+            // - YouTube shortcut via youtubeStreamKey
+            // - Generic RTMP via rtmpStreamKey and rtmpStreamUrl
+            if (platform === 'youtube') {
+                jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
+            } else {
+                jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: streamKey, rtmpStreamUrl: rtmpUrl });
+            }
+            setIsStreamModalOpen(false);
+        } finally {
+            setIsStartingStream(false);
+        }
     };
 
     const handleOpenShareModal = () => {
@@ -282,7 +305,13 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
 
     return (
         <>
-            {isStreamModalOpen && ( <StreamKeyModal onStart={handleStartStream} onClose={() => setIsStreamModalOpen(false)} isLoading={false} /> )}
+            {isStreamModalOpen && (
+                <LiveStreamModal
+                    onStart={handleStartStream}
+                    onClose={() => setIsStreamModalOpen(false)}
+                    isLoading={isStartingStream}
+                />
+            )}
             <AnimatePresence>
                 {isShareVideoModalOpen && (
                     <ShareVideoModal
@@ -307,17 +336,36 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                     {isHost && (
                         <>
                             <ControlButtonWithTooltip
-                                onClick={() => isStreaming ? handleStopStream() : setIsStreamModalOpen(true)}
-                                tooltip={isStreaming ? "Stop Live Stream" : "Go Live"}
-                                className={isStreaming ? 'bg-green-500 text-white live-indicator' : 'bg-cyan-600 hover:bg-cyan-500'}
+                                onClick={() => {
+                                    if (isRecording && !isStreaming) {
+                                        // Block open when recording
+                                        showToast && showToast({ title: 'Action blocked', message: 'You cannot go live while recording.', type: 'error' });
+                                        return;
+                                    }
+                                    isStreaming ? handleStopStream() : setIsStreamModalOpen(true)
+                                }}
+                                tooltip={isStreaming ? "Stop Live Stream" : (isRecording ? "Go Live (disabled during recording)" : "Go Live")}
+                                className={
+                                    isStreaming
+                                        ? 'bg-green-500 text-white live-indicator'
+                                        : isRecording
+                                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                        : 'bg-cyan-600 hover:bg-cyan-500'
+                                }
                             >
                                 <Radio size={22} />
                             </ControlButtonWithTooltip>
                             
                             <ControlButtonWithTooltip
                                 onClick={toggleRecording}
-                                tooltip={isRecording ? "Stop Recording" : "Start Recording"}
-                                className={isRecording ? 'bg-red-600 text-white recording-indicator' : 'bg-gray-700 hover:bg-gray-600'}
+                                tooltip={isRecording ? "Stop Recording" : (isStreaming ? "Start Recording (disabled while live)" : "Start Recording")}
+                                className={
+                                    isRecording
+                                        ? 'bg-red-600 text-white recording-indicator'
+                                        : isStreaming
+                                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                        : 'bg-gray-700 hover:bg-gray-600'
+                                }
                             >
                                 <CircleDot size={22} />
                             </ControlButtonWithTooltip>
@@ -350,7 +398,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                                     {isHost ? (
                                         <MenuItem
                                             icon={Paintbrush}
-                                            label={isWhiteboardOpen ? 'Hide Whiteboard (All)' : 'Show Whiteboard (All)'}
+                                            label={isWhiteboardOpen ? 'Hide Whiteboard' : 'Show Whiteboard'}
                                             onClick={handleToggleWhiteboard}
                                         />
                                     ) : (

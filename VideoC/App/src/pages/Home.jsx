@@ -70,7 +70,7 @@ const AppHeader = ({ userName, onStartInstant }) => {
                 <h2 className="text-2xl font-bold text-white">IN8</h2>
                 <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
                     <a href="#" className="text-white font-semibold">Home</a>
-                    <Link to="/dashboard" className="hover:text-white transition-colors">My Meetings</Link>
+                    <Link to="/meeting" className="hover:text-white transition-colors">My Meetings</Link>
                     <a href="#" className="hover:text-white transition-colors">Recordings</a>
                     <a href="#" className="hover:text-white transition-colors">Contacts</a>
                 </nav>

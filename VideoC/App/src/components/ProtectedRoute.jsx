@@ -10,6 +10,16 @@ const ProtectedRoute = ({ children, requiredRole, fallbackTo = '/home' }) => {
   const location = useLocation();
 
   if (!authToken) {
+    // Special handling: if user tried to open a meeting link directly, send them to guest join page
+    const meetingMatch = location.pathname.match(/^\/meeting\/([^\/?#]+)/i);
+    if (meetingMatch && meetingMatch[1]) {
+      // If guest flow initiated, allow access directly
+      const joinAsGuest = localStorage.getItem('joinAsGuest') === 'true';
+      if (joinAsGuest) {
+        return children;
+      }
+      return <Navigate to={`/guest/${meetingMatch[1]}`} replace />;
+    }
     return (
       <Navigate
         to="/"

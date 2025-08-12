@@ -5,6 +5,7 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Authpage from "./pages/Authpage";
 import Home from "./pages/Home";
 import Meeting from "./pages/Meeting";
+import GuestMeeting from "./pages/GuestMeeting";
 import Dashboard from "./pages/Dashboard";
 import Test from "./pages/Test";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -36,8 +37,10 @@ const App = () => {
           } 
         />
         
-        {/* highlight-start */}
-        {/* YEH NAYI LINE ADD KAREIN - Active meeting ke liye dynamic route */}
+        {/* Guest accessible meeting route (no auth) */}
+        <Route path="/guest/:meetingId" element={<GuestMeeting />} />
+
+        {/* Auth-protected meeting route */}
         <Route 
           path="/meeting/:meetingId" 
           element={
@@ -46,7 +49,6 @@ const App = () => {
             </ProtectedRoute>
           } 
         />
-        {/* highlight-end */}
 
         <Route 
           path="/dashboard" 

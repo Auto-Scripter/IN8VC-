@@ -16,6 +16,7 @@ import { InfoPanel } from '../components/InfoPanel';
 import Sidebar from "../components/Sidebar";
 import Toast from "../components/Toast";
 import JitsiMeet from '../components/JitsiMeet';
+import { createAdminJwt } from '../utils/jwt';
 import CustomControls from '../components/CustomControls';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -428,10 +429,15 @@ const MeetingPage = () => {
     const dashboardContainerRef = useRef(null);
     const [isJitsiLoading, setIsJitsiLoading] = useState(false);
     const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+    const [adminJwt, setAdminJwt] = useState(undefined);
 
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const inactivityTimer = useRef(null);
     const [hostParticipantId, setHostParticipantId] = useState(null);
+
+    const showToast = useCallback((toastData) => {
+        setActiveToast({ id: Date.now(), ...toastData });
+    }, []);
 
     useGSAP(() => {
         if (!activeMeeting && dashboardContainerRef.current) {
@@ -453,12 +459,9 @@ const MeetingPage = () => {
 
     useEffect(() => {
         const initializePage = async () => {
-            // CHANGED: Removed the check for currentUser here to allow the effect to run
             if (!meetingId) return;
 
-            // ADDED: Wait for currentUser to be available before proceeding
             if (!currentUser) {
-                // If the user isn't loaded yet, wait. This effect will re-run when currentUser changes.
                 return;
             }
 
@@ -467,8 +470,17 @@ const MeetingPage = () => {
                 const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
                 if (meetingDoc.exists()) {
                     const meetingData = meetingDoc.data();
-                    
-                    // ADDED: Host verification logic
+
+                    const banned = Array.isArray(meetingData.bannedDisplayNames) ? meetingData.bannedDisplayNames : [];
+                    const myName = (userName || 'Guest').trim().toLowerCase();
+                    const isBanned = banned.some(n => (n || '').trim().toLowerCase() === myName);
+                    if (isBanned) {
+                        showToast({ title: 'Access denied', message: 'You have been removed from this meeting.', type: 'error' });
+                        navigate('/meeting');
+                        setIsPageLoading(false);
+                        return;
+                    }
+
                     const localHostToken = localStorage.getItem(`hostToken_${meetingId}`);
                     const isUserTheHost = !!(localHostToken && localHostToken === meetingData.hostToken);
 
@@ -476,8 +488,19 @@ const MeetingPage = () => {
                         id: meetingId,
                         displayName: userName,
                         ...meetingData,
-                        isHost: isUserTheHost // ADDED: Pass host status to the meeting object
+                        isHost: isUserTheHost
                     });
+                    // Generate admin JWT only if current user is host
+                    if (isUserTheHost) {
+                        try {
+                            const token = await createAdminJwt({ name: userName, email: currentUser?.email, avatar: currentUser?.photoURL });
+                            setAdminJwt(token);
+                        } catch (e) {
+                            console.error('Failed to create admin JWT:', e);
+                        }
+                    } else {
+                        setAdminJwt(undefined);
+                    }
                     setIsJitsiLoading(true);
                 } else {
                     showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
@@ -544,6 +567,20 @@ const handleApiReady = useCallback((api) => {
         const meetingRef = doc(db, 'meetings', activeMeeting.id);
         const unsub = onSnapshot(meetingRef, (snap) => {
             const data = snap.data() || {};
+            // Ban enforcement: if my displayName is banned, end locally and block
+            const banned = Array.isArray(data.bannedDisplayNames) ? data.bannedDisplayNames : [];
+            const myName = (activeMeeting?.displayName || userName || 'Guest').trim().toLowerCase();
+            const isBanned = banned.some(n => (n || '').trim().toLowerCase() === myName);
+            if (isBanned) {
+                try { jitsiApi?.dispose(); } catch (_) {}
+                showToast({ title: 'Removed by host', message: 'You cannot rejoin this meeting.', type: 'error' });
+                setActiveMeeting(null);
+                setJitsiApi(null);
+                navigate('/meeting');
+                return;
+            }
+
+            // Whiteboard sync
             const targetOpen = !!data.whiteboardOpen;
             setWhiteboardOpen((prev) => {
                 if (prev !== targetOpen) {
@@ -555,7 +592,7 @@ const handleApiReady = useCallback((api) => {
             });
         });
         return () => unsub();
-    }, [activeMeeting?.id, jitsiApi]);
+    }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName]);
 
     // Host handler to flip the Firestore flag; all clients react via onSnapshot
     const handleToggleWhiteboard = useCallback(async () => {
@@ -568,8 +605,6 @@ const handleApiReady = useCallback((api) => {
         }
     }, [activeMeeting?.id, whiteboardOpen]);
 
-
-    const showToast = (toastData) => { setActiveToast({ id: Date.now(), ...toastData }); };
 
    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
         setIsLoading(true);
@@ -627,6 +662,10 @@ const handleApiReady = useCallback((api) => {
 
     const handleEndMeeting = useCallback(() => {
         showToast({ title: 'Meeting Ended', message: 'You have left the meeting.', type: 'info' });
+        // Clear guest flags on exit
+        localStorage.removeItem('joinAsGuest');
+        localStorage.removeItem('guestJoinAudio');
+        localStorage.removeItem('guestJoinVideo');
         setActiveMeeting(null);
         setJitsiApi(null);
         navigate('/meeting');
@@ -646,6 +685,7 @@ const handleApiReady = useCallback((api) => {
                     meetingLink={newMeetingLink || `${window.location.origin}/meeting/${activeMeeting.id}`}
                     isHost={activeMeeting.isHost}
                     localDisplayName={activeMeeting.displayName}
+                    meetingId={activeMeeting.id}
 />
 
             ) : (
@@ -669,19 +709,20 @@ const handleApiReady = useCallback((api) => {
 
             {/* Hide the Jitsi container until it's fully loaded */}
             <div className="flex-grow w-full h-0" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
-    <JitsiMeet
+        <JitsiMeet
         domain="meet.in8.com" 
         roomName={activeMeeting.id} 
         displayName={activeMeeting.displayName || userName}
         password={activeMeeting.password} 
         onMeetingEnd={handleEndMeeting} 
         onApiReady={handleApiReady}
-        startWithVideoMuted={activeMeeting.startWithVideoMuted} 
-        startWithAudioMuted={activeMeeting.startWithAudioMuted}
+        startWithVideoMuted={(() => { const g = localStorage.getItem('joinAsGuest') === 'true'; if (!g) return activeMeeting.startWithVideoMuted; const videoOn = localStorage.getItem('guestJoinVideo') === 'true'; return !videoOn; })()}
+        startWithAudioMuted={(() => { const g = localStorage.getItem('joinAsGuest') === 'true'; if (!g) return activeMeeting.startWithAudioMuted; const audioOn = localStorage.getItem('guestJoinAudio') === 'true'; return !audioOn; })()}
         prejoinPageEnabled={activeMeeting.prejoinPageEnabled} 
         toolbarButtons={EMPTY_TOOLBAR}
         showToast={showToast}
         noiseSuppressionEnabled={true} 
+        jwt={adminJwt}
 />
 </div>
                                 <div 

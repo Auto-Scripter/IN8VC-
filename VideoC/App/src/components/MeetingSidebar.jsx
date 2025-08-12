@@ -1,6 +1,8 @@
 // NEW_MeetingSidebar.js
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { db } from '../firebase';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -142,7 +144,7 @@ const SharePanel = ({ meetingLink, handleCopy, copiedItem }) => {
     )
 };
 
-const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, localDisplayName, hostParticipantId }) => {
+const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, localDisplayName, hostParticipantId, meetingId }) => {
     const [activePanel, setActivePanel] = useState('participants');
     const [copiedItem, setCopiedItem] = useState(null);
     const [participants, setParticipants] = useState([]);
@@ -168,7 +170,6 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             return;
         }
         const rawList = Array.isArray(jitsiApi.getParticipantsInfo()) ? jitsiApi.getParticipantsInfo() : [];
-        // Deduplicate by participantId to avoid doubles
         const dedupedMap = new Map();
         for (const p of rawList) {
             if (!dedupedMap.has(p.participantId)) dedupedMap.set(p.participantId, p);
@@ -219,10 +220,8 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
         return;
     }
 
-    // Call the update function once as soon as the API is ready.
     updateParticipantList();
 
-    // Set up listeners to handle future changes (people joining/leaving).
     const handleConferenceJoined = (e) => {
         if (e && e.id) setLocalParticipantId(e.id);
         scheduleUpdate();
@@ -244,8 +243,6 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     jitsiApi.addEventListener('videoConferenceLeft', handleChanged);
     jitsiApi.addEventListener('participantRoleChanged', handleRoleChanged);
 
-
-    // Cleanup function
     return () => {
         jitsiApi.removeEventListener('participantJoined', handleChanged);
         jitsiApi.removeEventListener('participantLeft', handleChanged);
@@ -269,8 +266,19 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
         };
    }, [jitsiApi, updateParticipantList]);
 
-    const handleKickParticipant = (participantId) => {
-        setConfirmKick({ participantId });
+    const handleKickParticipant = (participantOrId) => {
+        let id = null;
+        let name = null;
+        if (typeof participantOrId === 'string') {
+            id = participantOrId;
+            const p = participants.find(x => x.participantId === id);
+            name = p?.formattedDisplayName || p?.displayName || null;
+        } else if (participantOrId && typeof participantOrId === 'object') {
+            id = participantOrId.participantId;
+            name = participantOrId.formattedDisplayName || participantOrId.displayName || null;
+        }
+        if (!id) return;
+        setConfirmKick({ participantId: id, displayName: name });
     };
     const handleMuteAll = () => {
         jitsiApi?.executeCommand('muteEveryone');
@@ -375,7 +383,21 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                             <p className="text-sm text-slate-300 mb-4">This participant will be disconnected from the meeting.</p>
                             <div className="flex justify-end gap-3">
                                 <button onClick={() => setConfirmKick(null)} className="px-4 py-2 rounded-md bg-slate-700 text-slate-200 hover:bg-slate-600">Cancel</button>
-                                <button onClick={() => { jitsiApi?.executeCommand('kickParticipant', confirmKick.participantId); setConfirmKick(null); }} className="px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-500">Remove</button>
+                                <button onClick={async () => { 
+                                    try {
+                                        jitsiApi?.executeCommand('kickParticipant', confirmKick.participantId);
+                                        if (isHost && meetingId && confirmKick.displayName) {
+                                            // Persist ban in Firestore by display name (best-effort client-side)
+                                            await updateDoc(doc(db, 'meetings', meetingId), {
+                                                bannedDisplayNames: arrayUnion(confirmKick.displayName)
+                                            });
+                                        }
+                                    } catch (e) {
+                                        // ignore
+                                    } finally {
+                                        setConfirmKick(null);
+                                    }
+                                }} className="px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-500">Remove</button>
                             </div>
                         </motion.div>
                     </motion.div>
