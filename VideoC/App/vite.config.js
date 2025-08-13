@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     base: mode === 'development' ? '/' : './',
     plugins: [
       react(),
-      basicSsl() // <-- Isko yahan add karein
+      basicSsl() 
       
     ],
     server: {
