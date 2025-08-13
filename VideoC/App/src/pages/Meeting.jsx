@@ -20,7 +20,7 @@ import { createAdminJwt } from '../utils/jwt';
 import CustomControls from '../components/CustomControls';
 import { db, auth } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, updateDoc, query, where, orderBy } from 'firebase/firestore';
 import MeetingSidebar from '../components/MeetingSidebar';
 
 
@@ -429,6 +429,10 @@ const MeetingPage = () => {
     const dashboardContainerRef = useRef(null);
     const [isJitsiLoading, setIsJitsiLoading] = useState(false);
     const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+    const [adminIds, setAdminIds] = useState([]);
+    const [adminDisplayNames, setAdminDisplayNames] = useState([]);
+    const [isCurrentAdmin, setIsCurrentAdmin] = useState(false);
+    const prevIsAdminRef = useRef(false);
     const [adminJwt, setAdminJwt] = useState(undefined);
 
     const [areControlsVisible, setAreControlsVisible] = useState(true);
@@ -470,7 +474,7 @@ const MeetingPage = () => {
                 const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
                 if (meetingDoc.exists()) {
                     const meetingData = meetingDoc.data();
-
+                    
                     const banned = Array.isArray(meetingData.bannedDisplayNames) ? meetingData.bannedDisplayNames : [];
                     const myName = (userName || 'Guest').trim().toLowerCase();
                     const isBanned = banned.some(n => (n || '').trim().toLowerCase() === myName);
@@ -567,6 +571,31 @@ const handleApiReady = useCallback((api) => {
         const meetingRef = doc(db, 'meetings', activeMeeting.id);
         const unsub = onSnapshot(meetingRef, (snap) => {
             const data = snap.data() || {};
+            const admins = Array.isArray(data.adminIds) ? data.adminIds : [];
+            const normalize = (s) => {
+                let v = (s || '').toString();
+                v = v.replace(/\s*\([^)]*\)\s*$/g, '');
+                try { v = v.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (_) {}
+                v = v.replace(/\s+/g, ' ').trim().toLowerCase();
+                return v;
+            };
+            const adminNames = Array.isArray(data.adminDisplayNames) ? data.adminDisplayNames.map(n => normalize(n)) : [];
+            setAdminIds(admins);
+            setAdminDisplayNames(adminNames);
+            // determine if current user is admin (host always admin)
+            const localId = jitsiApi?.myUserId?.() || null;
+            // use same normalization as sidebar
+            const localDisplay = normalize(activeMeeting?.displayName || userName || '');
+            const isAdminNow = !!(activeMeeting?.isHost || (localId && admins.includes(localId)) || (localDisplay && adminNames.includes(localDisplay)));
+            if (prevIsAdminRef.current !== isAdminNow) {
+                if (isAdminNow) {
+                    showToast({ title: 'Role updated', message: 'You are now an admin.', type: 'success' });
+                } else if (prevIsAdminRef.current && !isAdminNow) {
+                    showToast({ title: 'Role updated', message: 'Your admin rights were removed.', type: 'info' });
+                }
+                prevIsAdminRef.current = isAdminNow;
+            }
+            setIsCurrentAdmin(isAdminNow);
             // Ban enforcement: if my displayName is banned, end locally and block
             const banned = Array.isArray(data.bannedDisplayNames) ? data.bannedDisplayNames : [];
             const myName = (activeMeeting?.displayName || userName || 'Guest').trim().toLowerCase();
@@ -592,7 +621,7 @@ const handleApiReady = useCallback((api) => {
             });
         });
         return () => unsub();
-    }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName]);
+    }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName, activeMeeting?.isHost]);
 
     // Host handler to flip the Firestore flag; all clients react via onSnapshot
     const handleToggleWhiteboard = useCallback(async () => {
@@ -604,6 +633,58 @@ const handleApiReady = useCallback((api) => {
             console.error('Failed to toggle whiteboard flag:', e);
         }
     }, [activeMeeting?.id, whiteboardOpen]);
+
+    // Host: process queued admin actions (grant proxy execution for promoted admins)
+    useEffect(() => {
+        if (!activeMeeting?.id || !jitsiApi || !activeMeeting?.isHost) return;
+        const actionsRef = collection(db, 'meetings', activeMeeting.id, 'actions');
+        const q = query(actionsRef, where('status', '==', 'pending'), orderBy('createdAt', 'asc'));
+        const unsub = onSnapshot(q, async (snap) => {
+            for (const docSnap of snap.docs) {
+                const action = docSnap.data() || {};
+                const actionRef = doc(db, 'meetings', activeMeeting.id, 'actions', docSnap.id);
+                try {
+                    switch (action.type) {
+                        case 'kick':
+                            if (action.targetParticipantId) {
+                                jitsiApi.executeCommand('kickParticipant', action.targetParticipantId);
+                            }
+                            break;
+                        case 'mute':
+                            if (action.targetParticipantId) {
+                                try { jitsiApi.executeCommand('muteParticipant', action.targetParticipantId); } catch (_) {}
+                            }
+                            break;
+                        case 'mute-everyone':
+                            try { jitsiApi.executeCommand('muteEveryone'); } catch (_) {}
+                            break;
+                        case 'recording-start':
+                            jitsiApi.executeCommand('startRecording', { mode: 'file' });
+                            break;
+                        case 'recording-stop':
+                            jitsiApi.executeCommand('stopRecording', 'file');
+                            break;
+                        case 'stream-start':
+                            if (action.platform === 'youtube' && action.streamKey) {
+                                jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: action.streamKey });
+                            } else if (action.streamKey && action.rtmpUrl) {
+                                jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: action.streamKey, rtmpStreamUrl: action.rtmpUrl });
+                            }
+                            break;
+                        case 'stream-stop':
+                            jitsiApi.executeCommand('stopRecording', 'stream');
+                            break;
+                        default:
+                            break;
+                    }
+                    await updateDoc(actionRef, { status: 'done', processedAt: serverTimestamp(), processedBy: jitsiApi.myUserId && jitsiApi.myUserId() });
+                } catch (err) {
+                    await updateDoc(actionRef, { status: 'error', error: String(err), processedAt: serverTimestamp(), processedBy: jitsiApi.myUserId && jitsiApi.myUserId() });
+                }
+            }
+        });
+        return () => unsub();
+    }, [activeMeeting?.id, activeMeeting?.isHost, jitsiApi]);
 
 
    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
@@ -684,8 +765,12 @@ const handleApiReady = useCallback((api) => {
                     jitsiApi={jitsiApi} 
                     meetingLink={newMeetingLink || `${window.location.origin}/meeting/${activeMeeting.id}`}
                     isHost={activeMeeting.isHost}
+                    isAdmin={isCurrentAdmin}
                     localDisplayName={activeMeeting.displayName}
                     meetingId={activeMeeting.id}
+                    adminIds={adminIds}
+                    adminDisplayNames={adminDisplayNames}
+                    showToast={showToast}
 />
 
             ) : (
@@ -709,7 +794,7 @@ const handleApiReady = useCallback((api) => {
 
             {/* Hide the Jitsi container until it's fully loaded */}
             <div className="flex-grow w-full h-0" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
-        <JitsiMeet
+    <JitsiMeet
         domain="meet.in8.com" 
         roomName={activeMeeting.id} 
         displayName={activeMeeting.displayName || userName}
@@ -740,6 +825,7 @@ const handleApiReady = useCallback((api) => {
         pauseTimer={() => clearTimeout(inactivityTimer.current)}
         resumeTimer={showControlsAndResetTimer}
         isHost={activeMeeting.isHost}
+        isAdmin={isCurrentAdmin}
         showToast={showToast}
         isWhiteboardOpen={whiteboardOpen}
         onToggleWhiteboard={handleToggleWhiteboard}

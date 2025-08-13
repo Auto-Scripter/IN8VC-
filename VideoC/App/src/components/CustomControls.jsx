@@ -121,7 +121,7 @@ const MenuItem = ({ icon: Icon, label, onClick }) => (
     </button>
 );
 
-const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer, isHost,  showToast, isWhiteboardOpen, onToggleWhiteboard }) => {
+const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, resumeTimer, isHost, isAdmin, showToast, isWhiteboardOpen, onToggleWhiteboard }) => {
     const [isAudioMuted, setIsAudioMuted] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
     const [isStreamModalOpen, setIsStreamModalOpen] = useState(false);
@@ -227,24 +227,46 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const toggleVideo = () => jitsiApi?.executeCommand('toggleVideo');
     const toggleScreenShare = () => jitsiApi?.executeCommand('toggleShareScreen');
     const raiseHand = () => jitsiApi?.executeCommand('toggleRaiseHand');
-    const toggleRecording = () => {
+    const toggleRecording = async () => {
         if (!jitsiApi) return;
         // Block starting recording if currently live
         if (!isRecording && isStreaming) {
             showToast && showToast({ title: 'Action blocked', message: 'You cannot record while live streaming.', type: 'error' });
             return;
         }
-        if (isRecording) {
-            const modeToStop = recordingMode || 'file';
-            jitsiApi.executeCommand('stopRecording', modeToStop);
-        } else {
-            jitsiApi.executeCommand('startRecording', { mode: 'file' });
-        }
+        try {
+            if (isRecording) {
+                const modeToStop = recordingMode || 'file';
+                jitsiApi.executeCommand('stopRecording', modeToStop);
+            } else {
+                if (isHost) {
+                    jitsiApi.executeCommand('startRecording', { mode: 'file' });
+                } else {
+                    // Proxy request via host
+                    const meetingId = window.location.pathname.split('/').pop();
+                    const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+                    const { db } = await import('../firebase');
+                    await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
+                        type: 'recording-start', status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
+                    });
+                    showToast && showToast({ title: 'Requested', message: 'Recording request sent to host.', type: 'info' });
+                }
+            }
+        } catch (_) {}
     };
-    const handleStopStream = () => {
+    const handleStopStream = async () => {
         if (!jitsiApi) return;
-        // Use string mode for compatibility
-        jitsiApi.executeCommand('stopRecording', 'stream');
+        if (isHost) {
+            jitsiApi.executeCommand('stopRecording', 'stream');
+        } else {
+            const meetingId = window.location.pathname.split('/').pop();
+            const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+            const { db } = await import('../firebase');
+            await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
+                type: 'stream-stop', status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
+            });
+            showToast && showToast({ title: 'Requested', message: 'Stop stream request sent to host.', type: 'info' });
+        }
     };
     const handleStartStream = async ({ platform, streamKey, rtmpUrl }) => {
         if (!jitsiApi) return;
@@ -258,10 +280,20 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
             // Jitsi External API supports two styles depending on deployment:
             // - YouTube shortcut via youtubeStreamKey
             // - Generic RTMP via rtmpStreamKey and rtmpStreamUrl
-            if (platform === 'youtube') {
-                jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
+            if (isHost) {
+                if (platform === 'youtube') {
+                    jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: streamKey });
+                } else {
+                    jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: streamKey, rtmpStreamUrl: rtmpUrl });
+                }
             } else {
-                jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: streamKey, rtmpStreamUrl: rtmpUrl });
+                const meetingId = window.location.pathname.split('/').pop();
+                const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+                const { db } = await import('../firebase');
+                await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
+                    type: 'stream-start', platform, streamKey, rtmpUrl, status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
+                });
+                showToast && showToast({ title: 'Requested', message: 'Live stream request sent to host.', type: 'info' });
             }
             setIsStreamModalOpen(false);
         } finally {
@@ -333,7 +365,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                     <ControlButtonWithTooltip onClick={toggleScreenShare} tooltip="Share Screen" className="bg-gray-700 hover:bg-gray-600"><MonitorUp size={22} /></ControlButtonWithTooltip>
                     <ControlButtonWithTooltip onClick={raiseHand} tooltip="Raise Hand" className="bg-gray-700 hover:bg-gray-600"><Hand size={22} /></ControlButtonWithTooltip>
                     
-                    {isHost && (
+                    {(isHost || isAdmin) && (
                         <>
                             <ControlButtonWithTooltip
                                 onClick={() => {
