@@ -75,6 +75,7 @@ const App = () => {
               <Home />
             </ProtectedRoute>
           } 
+           
         />
       </Routes>
     </Router>
