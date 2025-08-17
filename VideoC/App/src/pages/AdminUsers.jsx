@@ -12,6 +12,7 @@ const AdminUsers = () => {
   const [users, setUsers] = useState([]);
   const [filter, setFilter] = useState('');
   const [editingUid, setEditingUid] = useState(null);
+  const [editingOriginalRole, setEditingOriginalRole] = useState('user');
   const [form, setForm] = useState({ first_name: '', last_name: '', role: 'user' });
   const [createForm, setCreateForm] = useState({ first_name: '', last_name: '', email: '', password: '' });
   const [creating, setCreating] = useState(false);
@@ -151,10 +152,11 @@ const AdminUsers = () => {
 
   const startEdit = (u) => {
     setEditingUid(u.uid);
+    setEditingOriginalRole((u.role || 'user'));
     setForm({ first_name: u.first_name || '', last_name: u.last_name || '', role: u.role || 'user' });
     setIsEditOpen(true);
   };
-  const cancelEdit = () => { setEditingUid(null); setForm({ first_name: '', last_name: '', role: 'user' }); setIsEditOpen(false); };
+  const cancelEdit = () => { setEditingUid(null); setEditingOriginalRole('user'); setForm({ first_name: '', last_name: '', role: 'user' }); setIsEditOpen(false); };
   const performSaveEdit = async () => {
     setError('');
     // Try privileged update via Edge Function first
@@ -538,6 +540,24 @@ const AdminUsers = () => {
 
   // Save confirmation wrapper
   const saveEdit = async () => {
+    const wasAdmin = (editingOriginalRole || '').toLowerCase() === 'admin';
+    const willBeAdmin = (form.role || '').toLowerCase() === 'admin';
+    if (!wasAdmin && willBeAdmin) {
+      const email = (users.find(x => x.uid === editingUid)?.email || '').toLowerCase();
+      // Close the edit modal before showing the grant-admin confirmation
+      try { animateEditOut(); } catch (_) {}
+      setConfirmState({
+        open: true,
+        title: 'Grant admin privileges?',
+        message: `This will grant ${(email || 'this user')} full administrator rights, including editing users, disabling accounts, and deleting users. Proceed?`,
+        confirmLabel: 'Yes, make admin',
+        onConfirm: async () => {
+          await performSaveEdit();
+          afterSavedToast();
+        }
+      });
+      return;
+    }
     await performSaveEdit();
     afterSavedToast();
     animateEditOut();
@@ -860,7 +880,7 @@ const AdminUsers = () => {
 
       {/* Confirm Save Modal */}
       {confirmState.open && (
-        <div ref={confirmOverlayRef} className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) animateConfirmOut(); }}>
+        <div ref={confirmOverlayRef} className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) animateConfirmOut(); }}>
           <div ref={confirmPanelRef} className="w-full max-w-md rounded-2xl bg-slate-925 border border-slate-800 shadow-2xl p-6">
             <h3 className="text-lg font-medium">{confirmState.title}</h3>
             <p className="text-sm text-slate-400 mt-2">{confirmState.message}</p>
