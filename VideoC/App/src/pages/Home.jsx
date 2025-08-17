@@ -6,9 +6,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { auth, db } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { addDoc, collection, doc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../supabase';
 
 // --- MOCK DATA for Member View ---
 const upcomingMeetingsData = [
@@ -227,31 +225,41 @@ const HomePage = () => {
         if (storedUserName) {
             setUserName(storedUserName);
         }
-        const unsub = onAuthStateChanged(auth, (u) => setCurrentUser(u));
-        return () => unsub();
+        let mounted = true;
+        (async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (mounted) setCurrentUser(session?.user || null);
+        })();
+        const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+            if (!mounted) return;
+            setCurrentUser(session?.user || null);
+        });
+        return () => { mounted = false; sub.subscription.unsubscribe(); };
     }, []);
 
     const createInstantMeeting = async () => {
         if (!currentUser) { alert('You must be logged in to start a meeting.'); return; }
         try {
             const hostToken = uuidv4();
-            const payload = {
-                name: `Instant Meeting - ${new Date().toLocaleDateString()}`,
-                purpose: 'Quick call',
-                password: '',
-                isScheduled: false,
-                scheduledFor: null,
-                hostName: userName,
-                startWithAudioMuted: false,
-                startWithVideoMuted: false,
-                prejoinPageEnabled: false,
-                createdBy: currentUser.uid,
-                createdAt: serverTimestamp(),
-                hostToken,
-            };
-            const docRef = await addDoc(collection(db, 'meetings'), payload);
-            localStorage.setItem(`hostToken_${docRef.id}`, hostToken);
-            navigate(`/meeting/${docRef.id}`);
+            const { data, error } = await supabase.from('meetings')
+                .insert([{
+                    name: `Instant Meeting - ${new Date().toLocaleDateString()}`,
+                    purpose: 'Quick call',
+                    password: null,
+                    is_scheduled: false,
+                    scheduled_for: null,
+                    host_name: userName,
+                    start_with_audio_muted: false,
+                    start_with_video_muted: false,
+                    prejoin_page_enabled: false,
+                    created_by: currentUser.id,
+                    host_token: hostToken,
+                }])
+                .select('id')
+                .single();
+            if (error) throw error;
+            localStorage.setItem(`hostToken_${data.id}`, hostToken);
+            navigate(`/meeting/${data.id}`);
         } catch (e) {
             console.error('Failed to create meeting', e);
             alert('Failed to create meeting');
@@ -335,8 +343,8 @@ const HomePage = () => {
                                                 code = code.replace(/\s+/g, '');
                                                 if (!code) { alert('Please enter a valid meeting code or link.'); return; }
                                                 try {
-                                                    const snap = await getDoc(doc(db, 'meetings', code));
-                                                    if (snap.exists()) {
+                                                    const { data, error } = await supabase.from('meetings').select('id').eq('id', code).single();
+                                                    if (!error && data) {
                                                         navigate(`/meeting/${code}`);
                                                         setMeetingId('');
                                                     } else {
@@ -384,22 +392,24 @@ const HomePage = () => {
                                                 const [year,month,day] = date.split('-').map(n=>parseInt(n,10));
                                                 const [hour,minute] = time.split(':').map(n=>parseInt(n,10));
                                                 const scheduledFor = new Date(year, month-1, day, hour, minute);
-                                                const payload = {
-                                                    name: scheduleForm.meetingTitle,
-                                                    purpose: scheduleForm.meetingPurpose,
-                                                    password: '',
-                                                    isScheduled: true,
-                                                    scheduledFor,
-                                                    hostName: userName,
-                                                    startWithAudioMuted: !scheduleForm.micEnabled,
-                                                    startWithVideoMuted: !scheduleForm.cameraEnabled,
-                                                    prejoinPageEnabled: false,
-                                                    createdBy: currentUser.uid,
-                                                    createdAt: serverTimestamp(),
-                                                };
-                                                const ref = await addDoc(collection(db,'meetings'), payload);
+                                                const { data, error } = await supabase.from('meetings')
+                                                    .insert([{
+                                                        name: scheduleForm.meetingTitle,
+                                                        purpose: scheduleForm.meetingPurpose || null,
+                                                        password: null,
+                                                        is_scheduled: true,
+                                                        scheduled_for: scheduledFor.toISOString(),
+                                                        host_name: userName,
+                                                        start_with_audio_muted: !scheduleForm.micEnabled,
+                                                        start_with_video_muted: !scheduleForm.cameraEnabled,
+                                                        prejoin_page_enabled: false,
+                                                        created_by: currentUser.id,
+                                                    }])
+                                                    .select('id')
+                                                    .single();
+                                                if (error) throw error;
                                                 setIsScheduleOpen(false);
-                                                alert('Meeting scheduled. Share this code: '+ref.id);
+                                                alert('Meeting scheduled. Share this code: '+data.id);
                                             }catch(e){ console.error(e); alert('Failed to schedule'); }
                                         }} className="px-4 py-2 rounded-md bg-blue-600 text-white">Save</button>
                                     </div>

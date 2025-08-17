@@ -1,8 +1,7 @@
 // NEW_MeetingSidebar.js
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { doc, updateDoc, arrayUnion, addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -348,9 +347,12 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             if (isHost) {
                 jitsiApi?.executeCommand('muteEveryone');
             } else if (isAdmin && meetingId) {
-                await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                    type: 'mute-everyone', status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi?.myUserId && jitsiApi.myUserId()
-                });
+                await supabase.from('meeting_actions').insert([{
+                    meeting_id: meetingId,
+                    type: 'mute-everyone',
+                    status: 'pending',
+                    requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                }]);
                 showToast && showToast({ title: 'Requested', message: 'Mute all request sent to host.', type: 'info' });
             }
         } catch (_) {}
@@ -368,9 +370,13 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             if (isHost) {
                 jitsiApi?.executeCommand('askToUnmute', participantId);
             } else if (meetingId) {
-                await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                    type: 'mute', targetParticipantId: participantId, status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi?.myUserId && jitsiApi.myUserId()
-                });
+                await supabase.from('meeting_actions').insert([{
+                    meeting_id: meetingId,
+                    type: 'mute',
+                    target_participant_id: participantId,
+                    status: 'pending',
+                    requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                }]);
             }
         } catch (_) {}
     };
@@ -397,7 +403,10 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             const participant = (jitsiApi?.getParticipantsInfo?.() || []).find(p => p.participantId === participantId);
             const rawName = (participant?.formattedDisplayName || participant?.displayName || '');
             const display = normalizeName(rawName);
-            await updateDoc(doc(db, 'meetings', meetingId), { adminIds: arrayUnion(participantId), adminDisplayNames: arrayUnion(display) });
+            const { data: row } = await supabase.from('meetings').select('admin_ids, admin_display_names').eq('id', meetingId).single();
+            const ids = new Set(row?.admin_ids || []); ids.add(participantId);
+            const names = new Set(row?.admin_display_names || []); names.add(display);
+            await supabase.from('meetings').update({ admin_ids: Array.from(ids), admin_display_names: Array.from(names) }).eq('id', meetingId);
             showToast && showToast({ title: 'Promoted', message: `${participant?.displayName || 'Participant'} is now an admin.`, type: 'success' });
         } catch (e) {}
     };
@@ -405,13 +414,13 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     const demoteAdmin = async (participantId) => {
         if (!meetingId) return;
         try {
-            const ref = doc(db, 'meetings', meetingId);
-            // Use arrayRemove to revoke
             const participant = (jitsiApi?.getParticipantsInfo?.() || []).find(p => p.participantId === participantId);
             const rawName = (participant?.formattedDisplayName || participant?.displayName || '');
             const display = normalizeName(rawName);
-            const { arrayRemove } = await import('firebase/firestore');
-            await updateDoc(ref, { adminIds: arrayRemove(participantId), adminDisplayNames: arrayRemove(display) });
+            const { data: row } = await supabase.from('meetings').select('admin_ids, admin_display_names').eq('id', meetingId).single();
+            const ids = new Set(row?.admin_ids || []); ids.delete(participantId);
+            const names = new Set(row?.admin_display_names || []); names.delete(display);
+            await supabase.from('meetings').update({ admin_ids: Array.from(ids), admin_display_names: Array.from(names) }).eq('id', meetingId);
             try {
                 jitsiApi?.executeCommand && jitsiApi.executeCommand('revokeModerator', participantId);
             } catch (_) {}
@@ -438,6 +447,15 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                 <SidebarButton icon={Users} label="Participants" onClick={() => handleTogglePanel('participants')} isActive={activePanel === 'participants'} />
                 <SidebarButton icon={MessageSquare} label="Chat" onClick={() => handleTogglePanel('chat')} isActive={activePanel === 'chat'}/>
                 <SidebarButton icon={Share2} label="Share" onClick={() => handleTogglePanel('share')} isActive={activePanel === 'share'}/>
+                {(isHost || isAdmin) && (
+                  <button
+                    onClick={() => { window.location.href = '/admin/users'; }}
+                    className={`relative w-full flex items-center gap-4 p-3 rounded-lg text-sm font-medium transition-all duration-200 group hover:bg-slate-800/50`}
+                  >
+                    <span className={`absolute left-0 top-1/2 -translate-y-1/2 h-0 w-1 bg-cyan-400 rounded-r-full transition-all duration-300 ease-in-out group-hover:h-3/5`}></span>
+                    <span className={`ml-2 text-slate-300 group-hover:text-white`}>Admin: Users</span>
+                  </button>
+                )}
             </nav>
             
             <hr className="border-slate-800 my-3" />
@@ -506,12 +524,19 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                                         if (isHost) {
                                             jitsiApi?.executeCommand('kickParticipant', confirmKick.participantId);
                                         } else if (meetingId) {
-                                            await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                                                type: 'kick', targetParticipantId: confirmKick.participantId, status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi?.myUserId && jitsiApi.myUserId()
-                                            });
+                                            await supabase.from('meeting_actions').insert([{
+                                                meeting_id: meetingId,
+                                                type: 'kick',
+                                                target_participant_id: confirmKick.participantId,
+                                                status: 'pending',
+                                                requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                                            }]);
                                         }
                                         if ((isHost || isAdmin) && meetingId && confirmKick.displayName) {
-                                            await updateDoc(doc(db, 'meetings', meetingId), { bannedDisplayNames: arrayUnion(confirmKick.displayName) });
+                                            const { data: row } = await supabase.from('meetings').select('banned_display_names').eq('id', meetingId).single();
+                                            const banned = new Set(row?.banned_display_names || []);
+                                            banned.add(confirmKick.displayName);
+                                            await supabase.from('meetings').update({ banned_display_names: Array.from(banned) }).eq('id', meetingId);
                                         }
                                     } catch (e) {
                                     } finally {

@@ -244,11 +244,13 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                 } else {
                     // Proxy request via host
                     const meetingId = window.location.pathname.split('/').pop();
-                    const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-                    const { db } = await import('../firebase');
-                    await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                        type: 'recording-start', status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
-                    });
+                    const { supabase } = await import('../supabase');
+                    await supabase.from('meeting_actions').insert([{
+                        meeting_id: meetingId,
+                        type: 'recording-start',
+                        status: 'pending',
+                        requested_by: jitsiApi.myUserId && jitsiApi.myUserId()
+                    }]);
                     showToast && showToast({ title: 'Requested', message: 'Recording request sent to host.', type: 'info' });
                 }
             }
@@ -260,11 +262,13 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
             jitsiApi.executeCommand('stopRecording', 'stream');
         } else {
             const meetingId = window.location.pathname.split('/').pop();
-            const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-            const { db } = await import('../firebase');
-            await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                type: 'stream-stop', status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
-            });
+            const { supabase } = await import('../supabase');
+            await supabase.from('meeting_actions').insert([{
+                meeting_id: meetingId,
+                type: 'stream-stop',
+                status: 'pending',
+                requested_by: jitsiApi.myUserId && jitsiApi.myUserId()
+            }]);
             showToast && showToast({ title: 'Requested', message: 'Stop stream request sent to host.', type: 'info' });
         }
     };
@@ -288,11 +292,16 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                 }
             } else {
                 const meetingId = window.location.pathname.split('/').pop();
-                const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-                const { db } = await import('../firebase');
-                await addDoc(collection(db, 'meetings', meetingId, 'actions'), {
-                    type: 'stream-start', platform, streamKey, rtmpUrl, status: 'pending', createdAt: serverTimestamp(), requestedBy: jitsiApi.myUserId && jitsiApi.myUserId()
-                });
+                const { supabase } = await import('../supabase');
+                await supabase.from('meeting_actions').insert([{
+                    meeting_id: meetingId,
+                    type: 'stream-start',
+                    platform,
+                    stream_key: streamKey,
+                    rtmp_url: rtmpUrl,
+                    status: 'pending',
+                    requested_by: jitsiApi.myUserId && jitsiApi.myUserId()
+                }]);
                 showToast && showToast({ title: 'Requested', message: 'Live stream request sent to host.', type: 'info' });
             }
             setIsStreamModalOpen(false);

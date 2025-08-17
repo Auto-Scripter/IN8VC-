@@ -10,26 +10,11 @@ import backgroundImage from '../assets/bg5.jpg';
 import authBannerImage from '../assets/auth-banner.jpg';
 
 // Your Firebase imports
-import { auth, db } from '../firebase.js';
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithPopup,
-  sendPasswordResetEmail,
-} from 'firebase/auth';
-import { setDoc, doc, getDoc } from 'firebase/firestore';
+import { supabase } from '../supabase.js';
 
 // --- Components (Icons and Loaders) ---
 
-const GoogleIcon = () => (
-  <svg className="w-5 h-5 mr-3" viewBox="0 0 48 48">
-    <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039L38.804 9.196C34.976 5.82 29.828 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"></path>
-    <path fill="#FF3D00" d="M6.306 14.691c-1.645 3.119-2.656 6.637-2.656 10.309C3.65 29.363 4.661 32.881 6.306 36.009L12.05 31.549C11.233 29.531 10.8 27.345 10.8 25c0-2.345.433-4.531 1.25-6.549L6.306 14.691z"></path>
-    <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-5.657-5.657C30.072 34.668 27.221 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-5.744 4.614C10.032 39.577 16.506 44 24 44z"></path>
-    <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.16-4.082 5.571l5.657 5.657C42.488 36.425 44 31.13 44 25c0-2.616-.569-5.126-1.589-7.443l-5.8 4.526C37.525 18.067 37.225 20 37.225 20z"></path>
-  </svg>
-);
+// Google Sign-In removed
 
 const LoadingSpinner = () => (
   <svg className="animate-spin h-12 w-12 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -80,28 +65,42 @@ const AuthForm = () => {
   };
   
   const handleAuthError = (err) => {
-      const errorMap = {
-        'auth/invalid-credential': 'Invalid email or password. Please try again.',
-        'auth/email-already-in-use': 'An account with this email already exists.',
-        'auth/weak-password': 'The password is too weak. Please choose a stronger one.',
-        'auth/user-not-found': 'No account found with this email.',
-        'auth/invalid-email': 'Please enter a valid email address.'
-      };
-      showToast({ title: 'Authentication Error', message: errorMap[err.code] || err.message, type: 'error' });
+      const msg = err?.message || '';
+      let friendly = msg;
+      if (/invalid\s*grant/i.test(msg) || /invalid login credentials/i.test(msg)) {
+        friendly = 'Invalid email or password. Please try again.';
+      } else if (/email not confirmed/i.test(msg)) {
+        friendly = 'Email not confirmed. Disable confirmation in Supabase or confirm the email.';
+      }
+      showToast({ title: 'Authentication Error', message: friendly, type: 'error' });
   };
 
-  const isAdminUser = async (userEmail) => {
+  // Determine user's role based on profile.role or config_roles admin_email
+  const resolveUserRole = async (user) => {
+    const emailLower = (user?.email || '').toLowerCase();
+    let role = 'user';
+    try {
+      const { data: u } = await supabase.from('users').select('role').eq('uid', user.id).single();
+      if (u?.role) role = (u.role || 'user').toLowerCase();
+    } catch (_) {}
+    if (role !== 'admin') {
       try {
-          const rolesDocRef = doc(db, "config", "roles");
-          const docSnap = await getDoc(rolesDocRef);
-          if (docSnap.exists() && docSnap.data().adminEmail === userEmail) {
-              return true;
-          }
-      } catch (error) {
-          console.error("Error checking admin status:", error);
-      }
-      return false;
+        const { data: cfg } = await supabase
+          .from('config_roles')
+          .select('admin_email')
+          .eq('admin_email', emailLower)
+          .maybeSingle();
+        if (cfg?.admin_email && cfg.admin_email.toLowerCase() === emailLower) {
+          role = 'admin';
+          // persist role on profile for faster checks next time
+          await supabase.from('users').update({ role: 'admin' }).eq('uid', user.id);
+        }
+      } catch (_) {}
+    }
+    return role;
   };
+
+  // Session state removed (no sign out UI)
   
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -110,31 +109,43 @@ const AuthForm = () => {
 
     if (isLogin) {
       try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        const token = await user.getIdToken();
-        const userDocRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(userDocRef);
-        
-        if (docSnap.exists()) {
-            const userData = docSnap.data();
-            const userName = `${userData.firstName} ${userData.lastName}`;
-            localStorage.setItem('authToken', token);
-            localStorage.setItem('userName', userName);
-            localStorage.setItem('userEmail', user.email);
-            console.log("Auth Token:", token);
-            console.log("User Name:", userName);
-            console.log("User Email:", user.email);
+        const emailInput = email.trim();
+        const passwordInput = password;
+        const { data, error } = await supabase.auth.signInWithPassword({ email: emailInput, password: passwordInput });
+        if (error) throw error;
+        const user = data.user;
+        const accessToken = data.session?.access_token || '';
+        let { data: profile, error: profileErr } = await supabase
+            .from('users')
+            .select('first_name,last_name,role,is_active')
+            .eq('uid', user.id)
+            .single();
+        if (profileErr && /is_active/.test(String(profileErr.message || ''))) {
+            // Column missing: retry without is_active
+            const fallback = await supabase
+                .from('users')
+                .select('first_name,last_name,role')
+                .eq('uid', user.id)
+                .single();
+            profile = fallback.data;
         }
-        
-        const isAdmin = await isAdminUser(user.email);
-        if (isAdmin) {
-            localStorage.setItem('role', 'admin');
-            handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
-        } else {
-            localStorage.setItem('role', 'user');
-            handleAuthSuccess('Login Successful! Redirecting...', '/home');
+        if (!profile) {
+            await supabase.from('users').upsert({ uid: user.id, email: user.email, first_name: '', last_name: '', role: 'user', auth_provider: 'email', is_active: true });
+            const res = await supabase.from('users').select('first_name,last_name,role').eq('uid', user.id).single();
+            profile = res.data;
         }
+        if (profile && typeof profile.is_active !== 'undefined' && profile.is_active === false) {
+            throw new Error('Your account has been disabled by the admin.');
+        }
+        if (profile) {
+            const userName = `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
+            localStorage.setItem('authToken', accessToken);
+            localStorage.setItem('userName', userName || (user.email || ''));
+            localStorage.setItem('userEmail', user.email || '');
+        }
+        const role = await resolveUserRole(user);
+        localStorage.setItem('role', role);
+        handleAuthSuccess(role === 'admin' ? 'Admin Login Successful! Redirecting...' : 'Login Successful! Redirecting...', role === 'admin' ? '/dashboard' : '/home');
 
       } catch (err) {
         handleAuthError(err);
@@ -156,21 +167,36 @@ const AuthForm = () => {
       }
 
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        await setDoc(doc(db, "users", user.uid), { uid: user.uid, firstName, lastName, email: user.email, createdAt: new Date(), authProvider: "email" });
-        
-        const token = await user.getIdToken();
+        const emailInput = email.trim();
+        const passwordInput = password;
+        // Request immediate session on sign up
+        const { data, error } = await supabase.auth.signUp({ email: emailInput, password: passwordInput });
+        if (error) throw error;
+        let user = data.user;
+        let session = data.session;
+        // If no session (e.g., email confirmation enabled on project), attempt direct sign-in
+        if (!session) {
+          const { data: login, error: loginErr } = await supabase.auth.signInWithPassword({ email: emailInput, password: passwordInput });
+          if (loginErr) throw loginErr;
+          user = login.user;
+          session = login.session;
+        }
+        await supabase.from('users').upsert({
+          uid: user.id,
+          email: user.email,
+          first_name: firstName,
+          last_name: lastName,
+          role: 'user',
+          auth_provider: 'email',
+          is_active: true,
+        });
         const userName = `${firstName} ${lastName}`;
-        localStorage.setItem('authToken', token);
+        localStorage.setItem('authToken', session?.access_token || '');
         localStorage.setItem('userName', userName);
-        localStorage.setItem('userEmail', user.email);
-        localStorage.setItem('role', 'user');
-        console.log("Auth Token:", token);
-        console.log("User Name:", userName);
-        console.log("User Email:", user.email);
-
-        handleAuthSuccess('Account Created! Redirecting...', '/home');
+        localStorage.setItem('userEmail', user.email || '');
+        const role = await resolveUserRole(user);
+        localStorage.setItem('role', role);
+        handleAuthSuccess(role === 'admin' ? 'Admin Login Successful! Redirecting...' : 'Account Created! Redirecting...', role === 'admin' ? '/dashboard' : '/home');
       } catch (err) {
         handleAuthError(err);
       }
@@ -178,52 +204,9 @@ const AuthForm = () => {
     setLoading(false);
   };
 
-  const handleGoogleAuth = async () => {
-    setActiveToast(null);
-    setLoading(true);
-    const provider = new GoogleAuthProvider();
-    try {
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-      const userDocRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(userDocRef);
-      
-      let fName, lName;
-      if (!docSnap.exists()) {
-        const nameParts = user.displayName ? user.displayName.split(' ') : [];
-        fName = nameParts[0] || '';
-        lName = nameParts.slice(1).join(' ') || '';
-        await setDoc(userDocRef, { uid: user.uid, firstName: fName, lastName: lName, email: user.email, createdAt: new Date(), authProvider: "google" });
-      } else {
-          const userData = docSnap.data();
-          fName = userData.firstName;
-          lName = userData.lastName;
-      }
+  // Google Sign-In removed
 
-      const token = await user.getIdToken();
-      const userName = `${fName} ${lName}`;
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('userName', userName);
-      localStorage.setItem('userEmail', user.email);
-      console.log("Auth Token:", token);
-      console.log("User Name:", userName);
-      console.log("User Email:", user.email);
-
-      const isAdmin = await isAdminUser(user.email);
-      if (isAdmin) {
-          localStorage.setItem('role', 'admin');
-          handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
-      } else {
-          localStorage.setItem('role', 'user');
-          handleAuthSuccess('Login Successful! Redirecting...', '/home');
-      }
-
-    } catch (err) {
-      handleAuthError(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Sign out removed per request
 
   const handlePasswordReset = async (e) => {
     e.preventDefault();
@@ -232,7 +215,7 @@ const AuthForm = () => {
     }
     setLoading(true);
     try {
-        await sendPasswordResetEmail(auth, resetEmail);
+        await supabase.auth.resetPasswordForEmail(resetEmail, { redirectTo: `${window.location.origin}/` });
         showToast({ title: 'Check Your Email', message: 'Password reset link sent to your inbox.', type: 'success' });
         setIsResetModalOpen(false);
         setResetEmail('');
@@ -416,17 +399,7 @@ const AuthForm = () => {
                         {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Create Account')}
                         </button>
                     </div>
-                    <div className="flex items-center justify-center">
-                        <div className="flex-grow border-t border-slate-700"></div>
-                        <span className="mx-4 text-xs font-medium text-slate-500">OR</span>
-                        <div className="flex-grow border-t border-slate-700"></div>
-                    </div>
-                    <div>
-                        <button onClick={handleGoogleAuth} type="button" disabled={loading || isSuccess} className="w-full flex items-center justify-center bg-slate-700 border border-slate-600 rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 ring-offset-slate-900 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <GoogleIcon />
-                        Sign in with Google
-                        </button>
-                    </div>
+                    {/* Sign out UI removed */}
                 </motion.form>
                 <div className="text-center mt-6">
                 <div className="text-sm text-slate-400">

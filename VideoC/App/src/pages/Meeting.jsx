@@ -13,14 +13,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 
 import { InfoPanel } from '../components/InfoPanel';
-import Sidebar from "../components/Sidebar";
 import Toast from "../components/Toast";
 import JitsiMeet from '../components/JitsiMeet';
 import { createAdminJwt } from '../utils/jwt';
 import CustomControls from '../components/CustomControls';
-import { db, auth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp, getDoc, doc, onSnapshot, updateDoc, query, where, orderBy } from 'firebase/firestore';
+import { supabase } from '../supabase';
 import MeetingSidebar from '../components/MeetingSidebar';
 
 
@@ -83,11 +80,11 @@ const AnimatedBackground = () => {
     return (
         <div className="absolute top-0 left-0 w-full h-full z-0 overflow-hidden">
             <svg width="100%" height="100%" className="absolute top-0 left-0" preserveAspectRatio="none">
-                <defs><linearGradient id="line-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor="rgba(59, 130, 246, 0.2)" /><stop offset="100%" stopColor="rgba(139, 92, 246, 0.2)" /></linearGradient></defs>
-                {lines.map((_, i) => (<React.Fragment key={i}><motion.line x1="-5%" y1={`${(i / (numLines - 1)) * 100}%`} x2="105%" y2={`${(i / (numLines - 1)) * 100}%`} stroke="url(#line-gradient)" strokeWidth="0.3" variants={lineVariants} initial="hidden" animate="visible" custom={i} /><motion.line x1={`${(i / (numLines - 1)) * 100}%`} y1="-5%" x2={`${(i / (numLines - 1)) * 100}%`} y2="105%" stroke="url(#line-gradient)" strokeWidth="0.3" variants={lineVariants} initial="hidden" animate="visible" custom={i + 5} /></React.Fragment>))}
+                <defs><linearGradient id="line-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor="rgba(59, 130, 246, 0.12)" /><stop offset="100%" stopColor="rgba(139, 92, 246, 0.12)" /></linearGradient></defs>
+                {lines.map((_, i) => (<React.Fragment key={i}><motion.line x1="-5%" y1={`${(i / (numLines - 1)) * 100}%`} x2="105%" y2={`${(i / (numLines - 1)) * 100}%`} stroke="url(#line-gradient)" strokeWidth="0.25" variants={lineVariants} initial="hidden" animate="visible" custom={i} /><motion.line x1={`${(i / (numLines - 1)) * 100}%`} y1="-5%" x2={`${(i / (numLines - 1)) * 100}%`} y2="105%" stroke="url(#line-gradient)" strokeWidth="0.25" variants={lineVariants} initial="hidden" animate="visible" custom={i + 5} /></React.Fragment>))}
             </svg>
-            <motion.div className="absolute -top-1/4 -left-1/4 w-1/2 h-1/2 bg-gradient-to-br from-blue-600/40 to-purple-600/40 rounded-full filter blur-3xl opacity-40" animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0], scale: [1, 1.1, 1, 1.05, 1], rotate: [0, 10, -10, 0] }} transition={{ duration: 30, repeat: Infinity, repeatType: "mirror", ease: "easeInOut" }} />
-            <motion.div className="absolute -bottom-1/4 -right-1/4 w-3/4 h-3/4 bg-gradient-to-tl from-purple-600/30 to-blue-600/30 rounded-full filter blur-3xl opacity-40" animate={{ x: [0, -30, 10, 0], y: [0, 20, -40, 0], scale: [1, 1.05, 1, 0.95, 1], rotate: [0, -15, 15, 0] }} transition={{ duration: 35, repeat: Infinity, repeatType: "mirror", ease: "easeInOut", delay: 5 }} />
+            <motion.div className="absolute -top-1/4 -left-1/4 w-1/2 h-1/2 bg-gradient-to-br from-blue-600/20 to-purple-600/20 rounded-full filter blur-3xl opacity-20" animate={{ x: [0, 40, -20, 0], y: [0, -30, 20, 0], scale: [1, 1.1, 1, 1.05, 1], rotate: [0, 10, -10, 0] }} transition={{ duration: 30, repeat: Infinity, repeatType: "mirror", ease: "easeInOut" }} />
+            <motion.div className="absolute -bottom-1/4 -right-1/4 w-3/4 h-3/4 bg-gradient-to-tl from-purple-600/15 to-blue-600/15 rounded-full filter blur-3xl opacity-20" animate={{ x: [0, -30, 10, 0], y: [0, 20, -40, 0], scale: [1, 1.05, 1, 0.95, 1], rotate: [0, -15, 15, 0] }} transition={{ duration: 35, repeat: Infinity, repeatType: "mirror", ease: "easeInOut", delay: 5 }} />
         </div>
     );
 };
@@ -452,13 +449,25 @@ const MeetingPage = () => {
     }, { dependencies: [activeMeeting] });
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
+        let mounted = true;
+        (async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!mounted) return;
+            const user = session?.user || null;
             setCurrentUser(user);
             const storedUserName = localStorage.getItem('userName');
-            if (user) { setUserName(storedUserName || user.displayName || 'User'); } 
+            if (user) { setUserName(storedUserName || user.user_metadata?.full_name || 'User'); } 
+            else { setUserName('Guest'); }
+        })();
+        const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+            if (!mounted) return;
+            const user = session?.user || null;
+            setCurrentUser(user);
+            const storedUserName = localStorage.getItem('userName');
+            if (user) { setUserName(storedUserName || user.user_metadata?.full_name || 'User'); } 
             else { setUserName('Guest'); }
         });
-        return () => unsubscribe();
+        return () => { mounted = false; sub.subscription.unsubscribe(); };
     }, []);
 
     useEffect(() => {
@@ -471,11 +480,14 @@ const MeetingPage = () => {
 
             setIsPageLoading(true);
             try {
-                const meetingDoc = await getDoc(doc(db, 'meetings', meetingId));
-                if (meetingDoc.exists()) {
-                    const meetingData = meetingDoc.data();
+                const { data: meetingData, error } = await supabase
+                    .from('meetings')
+                    .select('*')
+                    .eq('id', meetingId)
+                    .single();
+                if (!error && meetingData) {
                     
-                    const banned = Array.isArray(meetingData.bannedDisplayNames) ? meetingData.bannedDisplayNames : [];
+                    const banned = Array.isArray(meetingData.banned_display_names) ? meetingData.banned_display_names : [];
                     const myName = (userName || 'Guest').trim().toLowerCase();
                     const isBanned = banned.some(n => (n || '').trim().toLowerCase() === myName);
                     if (isBanned) {
@@ -486,7 +498,7 @@ const MeetingPage = () => {
                     }
 
                     const localHostToken = localStorage.getItem(`hostToken_${meetingId}`);
-                    const isUserTheHost = !!(localHostToken && localHostToken === meetingData.hostToken);
+                    const isUserTheHost = !!(localHostToken && localHostToken === meetingData.host_token);
 
                     setActiveMeeting({
                         id: meetingId,
@@ -497,7 +509,7 @@ const MeetingPage = () => {
                     // Generate admin JWT only if current user is host
                     if (isUserTheHost) {
                         try {
-                            const token = await createAdminJwt({ name: userName, email: currentUser?.email, avatar: currentUser?.photoURL });
+                            const token = await createAdminJwt({ name: userName, email: currentUser?.email, avatar: currentUser?.user_metadata?.avatar_url });
                             setAdminJwt(token);
                         } catch (e) {
                             console.error('Failed to create admin JWT:', e);
@@ -511,7 +523,7 @@ const MeetingPage = () => {
                     navigate('/meeting');
                 }
             } catch (error) {
-                console.error("Firebase fetch error:", error);
+                console.error("Supabase fetch error:", error);
                 showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
                 navigate('/meeting');
             } finally {
@@ -535,11 +547,30 @@ const handleApiReady = useCallback((api) => {
             const localIsHost = !!activeMeeting?.isHost;
             if (localIsHost && e?.id) {
                 setHostParticipantId(e.id);
-                try { await updateDoc(doc(db, 'meetings', activeMeeting.id), { hostParticipantId: e.id }); } catch (_) {}
+                try { await supabase.from('meetings').update({ host_participant_id: e.id }).eq('id', activeMeeting.id); } catch (_) {}
             }
         };
         api.addEventListener('videoConferenceJoined', onJoined);
     } catch (_) {}
+}, [activeMeeting]);
+
+// Safety timeout for loader - if Jitsi doesn't initialize within 15 seconds, clear the loader
+useEffect(() => {
+    if (!activeMeeting) return;
+    
+    setIsJitsiLoading(true);
+    const timeout = setTimeout(() => {
+        if (isJitsiLoading) {
+            setIsJitsiLoading(false);
+            showToast({ 
+                title: 'Connection Issue', 
+                message: 'Meeting is taking longer than usual to load. Please check your internet connection.', 
+                type: 'warning' 
+            });
+        }
+    }, 15000);
+    
+    return () => clearTimeout(timeout);
 }, [activeMeeting]);
 
 
@@ -564,14 +595,15 @@ const handleApiReady = useCallback((api) => {
         };
     }, [activeMeeting, showControlsAndResetTimer]);
 
-    // Synchronize whiteboard via Firestore: when the doc's whiteboardOpen changes,
+    // Synchronize whiteboard via Supabase realtime: when the row's whiteboard_open changes,
     // toggle the Jitsi whiteboard to match on every client
     useEffect(() => {
         if (!activeMeeting?.id) return;
-        const meetingRef = doc(db, 'meetings', activeMeeting.id);
-        const unsub = onSnapshot(meetingRef, (snap) => {
-            const data = snap.data() || {};
-            const admins = Array.isArray(data.adminIds) ? data.adminIds : [];
+        const channel = supabase
+            .channel(`meeting-${activeMeeting.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings', filter: `id=eq.${activeMeeting.id}` }, (payload) => {
+            const data = payload.new || payload.old || {};
+            const admins = Array.isArray(data.admin_ids) ? data.admin_ids : [];
             const normalize = (s) => {
                 let v = (s || '').toString();
                 v = v.replace(/\s*\([^)]*\)\s*$/g, '');
@@ -579,7 +611,7 @@ const handleApiReady = useCallback((api) => {
                 v = v.replace(/\s+/g, ' ').trim().toLowerCase();
                 return v;
             };
-            const adminNames = Array.isArray(data.adminDisplayNames) ? data.adminDisplayNames.map(n => normalize(n)) : [];
+            const adminNames = Array.isArray(data.admin_display_names) ? data.admin_display_names.map(n => normalize(n)) : [];
             setAdminIds(admins);
             setAdminDisplayNames(adminNames);
             // determine if current user is admin (host always admin)
@@ -597,7 +629,7 @@ const handleApiReady = useCallback((api) => {
             }
             setIsCurrentAdmin(isAdminNow);
             // Ban enforcement: if my displayName is banned, end locally and block
-            const banned = Array.isArray(data.bannedDisplayNames) ? data.bannedDisplayNames : [];
+            const banned = Array.isArray(data.banned_display_names) ? data.banned_display_names : [];
             const myName = (activeMeeting?.displayName || userName || 'Guest').trim().toLowerCase();
             const isBanned = banned.some(n => (n || '').trim().toLowerCase() === myName);
             if (isBanned) {
@@ -610,7 +642,7 @@ const handleApiReady = useCallback((api) => {
             }
 
             // Whiteboard sync
-            const targetOpen = !!data.whiteboardOpen;
+            const targetOpen = !!data.whiteboard_open;
             setWhiteboardOpen((prev) => {
                 if (prev !== targetOpen) {
                     if (jitsiApi) {
@@ -619,40 +651,38 @@ const handleApiReady = useCallback((api) => {
                 }
                 return targetOpen;
             });
-        });
-        return () => unsub();
+        })
+        .subscribe();
+        return () => { supabase.removeChannel(channel); };
     }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName, activeMeeting?.isHost]);
 
     // Host handler to flip the Firestore flag; all clients react via onSnapshot
     const handleToggleWhiteboard = useCallback(async () => {
         if (!activeMeeting?.id) return;
         try {
-            const meetingRef = doc(db, 'meetings', activeMeeting.id);
-            await updateDoc(meetingRef, { whiteboardOpen: !whiteboardOpen });
+            await supabase.from('meetings').update({ whiteboard_open: !whiteboardOpen }).eq('id', activeMeeting.id);
         } catch (e) {
             console.error('Failed to toggle whiteboard flag:', e);
         }
     }, [activeMeeting?.id, whiteboardOpen]);
 
-    // Host: process queued admin actions (grant proxy execution for promoted admins)
+    // Host: process queued admin actions via Supabase realtime
     useEffect(() => {
         if (!activeMeeting?.id || !jitsiApi || !activeMeeting?.isHost) return;
-        const actionsRef = collection(db, 'meetings', activeMeeting.id, 'actions');
-        const q = query(actionsRef, where('status', '==', 'pending'), orderBy('createdAt', 'asc'));
-        const unsub = onSnapshot(q, async (snap) => {
-            for (const docSnap of snap.docs) {
-                const action = docSnap.data() || {};
-                const actionRef = doc(db, 'meetings', activeMeeting.id, 'actions', docSnap.id);
+        const chan = supabase
+            .channel(`actions-${activeMeeting.id}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'meeting_actions', filter: `meeting_id=eq.${activeMeeting.id}` }, async ({ new: action }) => {
+                if (!action || action.status !== 'pending') return;
                 try {
                     switch (action.type) {
                         case 'kick':
-                            if (action.targetParticipantId) {
-                                jitsiApi.executeCommand('kickParticipant', action.targetParticipantId);
+                            if (action.target_participant_id) {
+                                jitsiApi.executeCommand('kickParticipant', action.target_participant_id);
                             }
                             break;
                         case 'mute':
-                            if (action.targetParticipantId) {
-                                try { jitsiApi.executeCommand('muteParticipant', action.targetParticipantId); } catch (_) {}
+                            if (action.target_participant_id) {
+                                try { jitsiApi.executeCommand('muteParticipant', action.target_participant_id); } catch (_) {}
                             }
                             break;
                         case 'mute-everyone':
@@ -665,10 +695,10 @@ const handleApiReady = useCallback((api) => {
                             jitsiApi.executeCommand('stopRecording', 'file');
                             break;
                         case 'stream-start':
-                            if (action.platform === 'youtube' && action.streamKey) {
-                                jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: action.streamKey });
-                            } else if (action.streamKey && action.rtmpUrl) {
-                                jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: action.streamKey, rtmpStreamUrl: action.rtmpUrl });
+                            if (action.platform === 'youtube' && action.stream_key) {
+                                jitsiApi.executeCommand('startRecording', { mode: 'stream', youtubeStreamKey: action.stream_key });
+                            } else if (action.stream_key && action.rtmp_url) {
+                                jitsiApi.executeCommand('startRecording', { mode: 'stream', rtmpStreamKey: action.stream_key, rtmpStreamUrl: action.rtmp_url });
                             }
                             break;
                         case 'stream-stop':
@@ -677,13 +707,13 @@ const handleApiReady = useCallback((api) => {
                         default:
                             break;
                     }
-                    await updateDoc(actionRef, { status: 'done', processedAt: serverTimestamp(), processedBy: jitsiApi.myUserId && jitsiApi.myUserId() });
+                    await supabase.from('meeting_actions').update({ status: 'done', processed_at: new Date().toISOString(), requested_by: jitsiApi.myUserId && jitsiApi.myUserId() }).eq('id', action.id);
                 } catch (err) {
-                    await updateDoc(actionRef, { status: 'error', error: String(err), processedAt: serverTimestamp(), processedBy: jitsiApi.myUserId && jitsiApi.myUserId() });
+                    await supabase.from('meeting_actions').update({ status: 'error', error: String(err), processed_at: new Date().toISOString(), requested_by: jitsiApi.myUserId && jitsiApi.myUserId() }).eq('id', action.id);
                 }
-            }
-        });
-        return () => unsub();
+            })
+            .subscribe();
+        return () => { supabase.removeChannel(chan); };
     }, [activeMeeting?.id, activeMeeting?.isHost, jitsiApi]);
 
 
@@ -698,24 +728,33 @@ const handleApiReady = useCallback((api) => {
         try {
             const hostToken = uuidv4();
 
-            const meetingPayload = { 
-                ...formData, 
-                createdBy: currentUser.uid, 
-                createdAt: serverTimestamp(),
-                hostToken: hostToken
-            };
-
-            const docRef = await addDoc(collection(db, 'meetings'), meetingPayload);
-            const link = `${window.location.origin}/meeting/${docRef.id}`;
+            const { data, error } = await supabase.from('meetings')
+                .insert([{
+                    name: formData.name,
+                    purpose: formData.purpose || null,
+                    password: formData.password || null,
+                    is_scheduled: !!formData.isScheduled,
+                    scheduled_for: formData.scheduledFor ? new Date(formData.scheduledFor).toISOString() : null,
+                    host_name: formData.hostName || null,
+                    start_with_audio_muted: !!formData.startWithAudioMuted,
+                    start_with_video_muted: !!formData.startWithVideoMuted,
+                    prejoin_page_enabled: !!formData.prejoinPageEnabled,
+                    created_by: currentUser.id,
+                    host_token: hostToken,
+                }])
+                .select('id')
+                .single();
+            if (error || !data?.id) throw error || new Error('Meeting creation failed');
+            const link = `${window.location.origin}/meeting/${data.id}`;
             
             // ADDED: 3. Save the token in localStorage, associated with the new meeting ID
-            localStorage.setItem(`hostToken_${docRef.id}`, hostToken);
+            localStorage.setItem(`hostToken_${data.id}`, hostToken);
             
             setNewMeetingLink(link);
             showToast({ title: 'Success!', message: `Meeting ${scheduleOption === 'now' ? 'created' : 'scheduled'}!`, type: 'success' });
             
             if (scheduleOption === 'now') {
-                navigate(`/meeting/${docRef.id}`);
+                navigate(`/meeting/${data.id}`);
             } else {
                 setIsShareModalOpen(true);
             }
@@ -773,9 +812,7 @@ const handleApiReady = useCallback((api) => {
                     showToast={showToast}
 />
 
-            ) : (
-                <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
-            )}
+            ) : null}
             <div className="fixed top-5 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5 w-full max-w-sm px-4 sm:px-0 z-[60]"><AnimatePresence>{activeToast && <Toast key={activeToast.id} toast={activeToast} onClose={() => setActiveToast(null)} />}</AnimatePresence></div>
             <AnimatePresence>{isShareModalOpen && <ShareModal meetingLink={newMeetingLink} onClose={() => setIsShareModalOpen(false)} />}</AnimatePresence>
             <div className="flex-1 flex flex-col h-screen relative">
@@ -787,15 +824,15 @@ const handleApiReady = useCallback((api) => {
                 <main className={`flex-1 flex flex-col h-full transition-all duration-300 ${activeMeeting ? 'p-0' : 'p-4 sm:p-6'}`}>
                     <AnimatePresence mode="wait">
                         {activeMeeting ? (
-        <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-900 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
+        <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-950 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
             
             {/* +++ Render LoadingScreen when Jitsi is loading +++ */}
             {isJitsiLoading && <LoadingScreen />}
 
             {/* Hide the Jitsi container until it's fully loaded */}
-            <div className="flex-grow w-full h-0" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
+            <div className="flex-grow w-full min-h-[400px]" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
     <JitsiMeet
-        domain="meet.in8.com" 
+        domain="meet.jit.si" 
         roomName={activeMeeting.id} 
         displayName={activeMeeting.displayName || userName}
         password={activeMeeting.password} 
@@ -863,7 +900,7 @@ const handleApiReady = useCallback((api) => {
 
 export default function MeetingPageContainer() {
     return (
-        <div className="relative min-h-screen bg-slate-900 text-white font-sans">
+        <div className="relative min-h-screen bg-slate-950 text-white font-sans">
             <AnimatedBackground />
             <MeetingPage />
         </div>

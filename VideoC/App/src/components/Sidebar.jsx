@@ -101,7 +101,7 @@ const SidebarContent = ({ activeLink, setActiveLink, onLogout }) => {
 }
 
 // Main responsive wrapper
-export default function Sidebar({ isOpen, setIsOpen, activeLink, setActiveLink }) {
+export default function Sidebar({ isOpen, setIsOpen, activeLink, setActiveLink, hidden = false }) {
     const navigate = useNavigate();
     const [activeToast, setActiveToast] = useState(null);
 
@@ -145,7 +145,7 @@ export default function Sidebar({ isOpen, setIsOpen, activeLink, setActiveLink }
             </div>
 
             {/* --- Desktop Sidebar --- */}
-            <aside className="w-64 min-h-screen hidden lg:flex flex-col bg-black/20 backdrop-blur-lg p-4 border-r border-slate-800">
+            <aside className={`w-64 min-h-screen ${hidden ? 'hidden' : 'hidden lg:flex'} flex-col bg-black/20 backdrop-blur-lg p-4 border-r border-slate-800`}>
                 <SidebarContent 
                     activeLink={activeLink} 
                     setActiveLink={setActiveLink}
@@ -155,7 +155,7 @@ export default function Sidebar({ isOpen, setIsOpen, activeLink, setActiveLink }
 
             {/* --- Mobile Sidebar --- */}
             <AnimatePresence>
-                {isOpen && (
+                {isOpen && !hidden && (
                     <div className="lg:hidden">
                         <motion.div
                             initial={{ opacity: 0 }}

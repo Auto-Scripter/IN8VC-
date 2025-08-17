@@ -222,8 +222,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-gray-900 text-white font-sans">
       <div className="flex h-screen">
-       <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
-
         <div className="flex-1 flex flex-col h-screen">
             <motion.header 
                 initial={{ opacity: 0, y: -20 }} 
