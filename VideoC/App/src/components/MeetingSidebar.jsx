@@ -24,10 +24,7 @@ const SidebarButton = ({ icon: Icon, label, onClick, isActive }) => (
     </button>
 );
 
-// --- Helper: Participants Panel ---
-// In NEW_MeetingSidebar.js
-
-// ❗️ REPLACE your entire ParticipantsPanel component with this correct version ❗️
+// ❗️ REWRITE: participants use isAdmin flag only for badge and actions ❗️
 const ParticipantsPanel = ({ participants, isHost, isAdmin, onKick, onMuteAll, onAskToUnmute, onRequestMute, onPromote, onDemote, adminIdsSet }) => {
     const avatarColors = [
         'from-cyan-500 to-blue-600', 'from-emerald-500 to-green-600',
@@ -72,9 +69,9 @@ const ParticipantsPanel = ({ participants, isHost, isAdmin, onKick, onMuteAll, o
                         </div>
                         <span className="text-slate-200 text-sm truncate flex-grow">{p.formattedDisplayName}</span>
                         <div className="ml-auto flex items-center gap-1">
-                            { (isHost || isAdmin) && !p.isLocal && (
+                            {(isHost || isAdmin) && !p.isLocal && (
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                    {!p.isModerator && (
+                                    {!p.isAdmin && (
                                         <>
                                             {p.isAudioMuted ? (
                                                 <button onClick={() => onAskToUnmute(p.participantId)} title="Ask to Unmute" className="p-1.5 text-cyan-400 hover:text-white hover:bg-slate-600 rounded-full">
@@ -90,21 +87,21 @@ const ParticipantsPanel = ({ participants, isHost, isAdmin, onKick, onMuteAll, o
                                             </button>
                                         </>
                                     )}
-                                    {p.isModerator ? (
-                                        // Show demote only for non-host admins
+                                    {p.isAdmin && !p.isLocal ? (
                                         <>
                                             <button onClick={() => onDemote && onDemote(p.participantId)} title="Remove Admin" className="p-1.5 text-violet-400 hover:text-white hover:bg-violet-500 rounded-full">
                                                 <ShieldMinus size={14} />
                                             </button>
                                         </>
-                                    ) : (
+                                    ) : null}
+                                    {!p.isAdmin ? (
                                         <button onClick={() => onPromote && onPromote(p.participantId)} title="Make Admin" className="p-1.5 text-violet-400 hover:text-white hover:bg-violet-500 rounded-full">
                                             <ShieldPlus size={14} />
                                         </button>
-                                    )}
+                                    ) : null}
                                 </div>
                             )}
-                            {p.isModerator && (
+                            {p.isAdmin && (
                                 <Award size={16} title={p.isLocal ? 'You are the host' : 'Admin'} className="text-amber-400 flex-shrink-0" />
                             )}
                         </div>
@@ -115,7 +112,6 @@ const ParticipantsPanel = ({ participants, isHost, isAdmin, onKick, onMuteAll, o
     );
 };
 
-// --- Helper: Share Panel ---
 const SharePanel = ({ meetingLink, handleCopy, copiedItem }) => {
     const meetingCode = meetingLink ? meetingLink.substring(meetingLink.lastIndexOf('/') + 1) : '';
 
@@ -159,7 +155,7 @@ const SharePanel = ({ meetingLink, handleCopy, copiedItem }) => {
     )
 };
 
-const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, isAdmin, localDisplayName, hostParticipantId, meetingId, adminIds = [], adminDisplayNames = [], showToast }) => {
+const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, isAdmin, localDisplayName, hostName, hostParticipantId, meetingId, adminIds = [], adminDisplayNames = [], showToast }) => {
     const [activePanel, setActivePanel] = useState('participants');
     const [copiedItem, setCopiedItem] = useState(null);
     const [participants, setParticipants] = useState([]);
@@ -168,17 +164,14 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     const adminIdsSet = useMemo(() => new Set(adminIds), [adminIds]);
     const normalizeName = useCallback((s) => {
         let v = (s || '').toString();
-        // remove trailing parenthetical like (You), (Host), (Guest)
         v = v.replace(/\s*\([^)]*\)\s*$/g, '');
-        // unicode/diacritics
         try { v = v.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (_) {}
-        // collapse spaces and lowercase
         v = v.replace(/\s+/g, ' ').trim().toLowerCase();
         return v;
     }, []);
     const adminNamesSet = useMemo(() => new Set((adminDisplayNames || []).map(n => normalizeName(n))), [adminDisplayNames, normalizeName]);
-    const [confirmKick, setConfirmKick] = useState(null); // participant object to confirm removal
-    const [confirmMute, setConfirmMute] = useState(null); // participant object to confirm mute
+    const [confirmKick, setConfirmKick] = useState(null);
+    const [confirmMute, setConfirmMute] = useState(null);
     const updateTimerRef = useRef(null);
     const pollRef = useRef(null);
     
@@ -192,120 +185,109 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
         }
     }, { dependencies: [isOpen] });
     
-   const updateParticipantList = useCallback(() => {
-        if (!jitsiApi) {
-            return;
-        }
-        const rawList = Array.isArray(jitsiApi.getParticipantsInfo()) ? jitsiApi.getParticipantsInfo() : [];
-        // First pass: dedup by participantId
-        const byId = new Map();
-        for (const p of rawList) {
-            if (!byId.has(p.participantId)) byId.set(p.participantId, p);
-        }
-        // Second pass: dedup by normalized name (handles cases where Jitsi reports duplicate entries for same user)
-        const byName = new Map();
-        for (const p of byId.values()) {
-            const display = (p.formattedDisplayName || p.displayName || 'User');
+    const updateParticipantList = useCallback(() => {
+        if (!jitsiApi) return;
+
+        const list = Array.isArray(jitsiApi.getParticipantsInfo()) ? jitsiApi.getParticipantsInfo() : [];
+        const localId = localParticipantId;
+
+        const bestByName = new Map();
+        for (const p of list) {
+            const display = p.formattedDisplayName || p.displayName || 'User';
             const norm = normalizeName(display);
-            const existing = byName.get(norm);
-            if (!existing) {
-                byName.set(norm, p);
-            } else {
-                // Prefer the local participant or the one matching hostParticipantId
-                const pickLocal = (cand) => cand && cand.participantId && cand.participantId === localParticipantId;
-                const pickHost = (cand) => cand && cand.participantId && hostParticipantId && cand.participantId === hostParticipantId;
-                const chosen = pickLocal(p) || pickHost(p) ? p : (pickLocal(existing) || pickHost(existing) ? existing : existing);
-                byName.set(norm, chosen);
+            const curr = bestByName.get(norm);
+            const prefer = (hostParticipantId && p.participantId === hostParticipantId) || (localId && p.participantId === localId);
+            if (!curr || prefer) {
+                bestByName.set(norm, {
+                    participantId: p.participantId,
+                    formattedDisplayName: display,
+                    isAudioMuted: !!p.isAudioMuted,
+                    role: p.role,
+                    isModeratorFlag: !!p.isModerator,
+                });
             }
         }
-        const deduped = Array.from(byName.values()).map(p => ({
-            ...p,
-            formattedDisplayName: p.formattedDisplayName || p.displayName || 'User'
-        }));
 
-        // Mark local participant and moderator flags without duplicating entries
-        const localId = localParticipantId;
-        // Final pass: drop any ghost tiles that are missing essential fields
-        const ghostFree = deduped.filter(p => p && p.participantId && (p.formattedDisplayName || p.displayName));
-
-        const mapped = ghostFree.map(p => {
-            const name = normalizeName(p.formattedDisplayName || p.displayName);
-            const isAdminById = adminIdsSet.has(p.participantId);
-            const isAdminByName = adminNamesSet.has(name);
-            const isMod = (
-                moderatorIds.has(p.participantId) ||
-                p.isModerator ||
-                p.role === 'moderator' ||
-                isAdminById ||
-                isAdminByName ||
+        const mapped = Array.from(bestByName.values()).map(p => {
+            const norm = normalizeName(p.formattedDisplayName);
+            const isAdmin = (
+                adminIdsSet.has(p.participantId) ||
+                adminNamesSet.has(norm) ||
                 (hostParticipantId && p.participantId === hostParticipantId) ||
-                (isHost || isAdmin) && (p.participantId === localId)
+                (hostName && normalizeName(hostName) === norm) ||
+                p.isModeratorFlag ||
+                p.role === 'moderator'
             );
             return {
                 ...p,
                 isLocal: p.participantId === localId,
-                formattedDisplayName: p.formattedDisplayName || p.displayName || 'User',
-                isModerator: isMod,
+                isAdmin,
             };
         });
 
-        setParticipants(mapped);
-    }, [jitsiApi, isHost, isAdmin, localDisplayName, localParticipantId, moderatorIds, hostParticipantId, adminIdsSet, adminNamesSet, normalizeName]);
+        mapped.sort((a, b) => {
+            if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
+            if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1;
+            return a.formattedDisplayName.localeCompare(b.formattedDisplayName);
+        });
 
-    // Force refresh participant list immediately when admin sets change so badges update for all
+        setParticipants(mapped);
+    }, [jitsiApi, localParticipantId, hostParticipantId, hostName, adminIdsSet, adminNamesSet, normalizeName]);
+
+    // Force refresh participant list when admin sets or host id change so badges update immediately
     useEffect(() => {
         updateParticipantList();
-    }, [adminIdsSet, adminNamesSet, updateParticipantList]);
+    }, [adminIdsSet, adminNamesSet, hostParticipantId, updateParticipantList]);
 
-   const scheduleUpdate = useCallback(() => {
+    const scheduleUpdate = useCallback(() => {
         if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
         updateTimerRef.current = setTimeout(() => {
             updateParticipantList();
         }, 150);
-   }, [updateParticipantList]);
+    }, [updateParticipantList]);
 
-   useEffect(() => {
-    if (!jitsiApi) {
-        return;
-    }
+    useEffect(() => {
+        if (!jitsiApi) {
+            return;
+        }
 
-    updateParticipantList();
+        updateParticipantList();
 
-    const handleConferenceJoined = (e) => {
-        if (e && e.id) setLocalParticipantId(e.id);
-        scheduleUpdate();
-    };
-    const handleChanged = () => scheduleUpdate();
-    const handleRoleChanged = ({ id, role }) => {
-        setModeratorIds(prev => {
-            const next = new Set(prev);
-            if (role === 'moderator') next.add(id); else next.delete(id);
-            return next;
-        });
-        scheduleUpdate();
-    };
-    jitsiApi.addEventListener('participantJoined', handleChanged);
-    jitsiApi.addEventListener('participantLeft', handleChanged);
-    jitsiApi.addEventListener('displayNameChange', handleChanged);
-    jitsiApi.addEventListener('participantMuteStatusChanged', handleChanged);
-    jitsiApi.addEventListener('videoConferenceJoined', handleConferenceJoined);
-    jitsiApi.addEventListener('videoConferenceLeft', handleChanged);
-    jitsiApi.addEventListener('participantRoleChanged', handleRoleChanged);
+        const handleConferenceJoined = (e) => {
+            if (e && e.id) setLocalParticipantId(e.id);
+            scheduleUpdate();
+        };
+        const handleChanged = () => scheduleUpdate();
+        const handleRoleChanged = ({ id, role }) => {
+            setModeratorIds(prev => {
+                const next = new Set(prev);
+                if (role === 'moderator') next.add(id); else next.delete(id);
+                return next;
+            });
+            scheduleUpdate();
+        };
+        jitsiApi.addEventListener('participantJoined', handleChanged);
+        jitsiApi.addEventListener('participantLeft', handleChanged);
+        jitsiApi.addEventListener('displayNameChange', handleChanged);
+        jitsiApi.addEventListener('participantMuteStatusChanged', handleChanged);
+        jitsiApi.addEventListener('videoConferenceJoined', handleConferenceJoined);
+        jitsiApi.addEventListener('videoConferenceLeft', handleChanged);
+        jitsiApi.addEventListener('participantRoleChanged', handleRoleChanged);
 
-    return () => {
-        jitsiApi.removeEventListener('participantJoined', handleChanged);
-        jitsiApi.removeEventListener('participantLeft', handleChanged);
-        jitsiApi.removeEventListener('displayNameChange', handleChanged);
-        jitsiApi.removeEventListener('participantMuteStatusChanged', handleChanged);
-        jitsiApi.removeEventListener('videoConferenceJoined', handleConferenceJoined);
-        jitsiApi.removeEventListener('videoConferenceLeft', handleChanged);
-        jitsiApi.removeEventListener('participantRoleChanged', handleRoleChanged);
-        if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+        return () => {
+            jitsiApi.removeEventListener('participantJoined', handleChanged);
+            jitsiApi.removeEventListener('participantLeft', handleChanged);
+            jitsiApi.removeEventListener('displayNameChange', handleChanged);
+            jitsiApi.removeEventListener('participantMuteStatusChanged', handleChanged);
+            jitsiApi.removeEventListener('videoConferenceJoined', handleConferenceJoined);
+            jitsiApi.removeEventListener('videoConferenceLeft', handleChanged);
+            jitsiApi.removeEventListener('participantRoleChanged', handleRoleChanged);
+            if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
 
-    };
-}, [jitsiApi, isHost, updateParticipantList]); 
+        };
+    }, [jitsiApi, isHost, updateParticipantList]); 
 
-   useEffect(() => {
+    useEffect(() => {
         if (!jitsiApi) return;
         pollRef.current = setInterval(() => {
             updateParticipantList();
@@ -334,12 +316,14 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             if (isHost) {
                 jitsiApi?.executeCommand('muteEveryone');
             } else if (isAdmin && meetingId) {
-                await supabase.from('meeting_actions').insert([{
-                    meeting_id: meetingId,
-                    type: 'mute-everyone',
-                    status: 'pending',
-                    requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
-                }]);
+                await supabase.from('meeting_actions').insert([
+                    {
+                        meeting_id: meetingId,
+                        type: 'mute-everyone',
+                        status: 'pending',
+                        requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                    }
+                ]);
                 showToast && showToast({ title: 'Requested', message: 'Mute all request sent to host.', type: 'info' });
             }
         } catch (_) {}
@@ -351,19 +335,20 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
 
     // Force mute using askToUnmute command (works as a mute request)
     const handleForceMute = async (participantId) => {
-        // If not a real moderator, enqueue action for host
         if (!(isHost || isAdmin)) return;
         try {
             if (isHost) {
                 jitsiApi?.executeCommand('askToUnmute', participantId);
             } else if (meetingId) {
-                await supabase.from('meeting_actions').insert([{
-                    meeting_id: meetingId,
-                    type: 'mute',
-                    target_participant_id: participantId,
-                    status: 'pending',
-                    requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
-                }]);
+                await supabase.from('meeting_actions').insert([
+                    {
+                        meeting_id: meetingId,
+                        type: 'mute',
+                        target_participant_id: participantId,
+                        status: 'pending',
+                        requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                    }
+                ]);
             }
         } catch (_) {}
     };
@@ -383,7 +368,6 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
     const promoteToAdmin = async (participantId) => {
         if (!meetingId) return;
         try {
-            // Server-side: ask Jitsi to grant moderator immediately
             try {
                 jitsiApi?.executeCommand && jitsiApi.executeCommand('grantModerator', participantId);
             } catch (_) {}
@@ -511,13 +495,15 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
                                         if (isHost) {
                                             jitsiApi?.executeCommand('kickParticipant', confirmKick.participantId);
                                         } else if (meetingId) {
-                                            await supabase.from('meeting_actions').insert([{
-                                                meeting_id: meetingId,
-                                                type: 'kick',
-                                                target_participant_id: confirmKick.participantId,
-                                                status: 'pending',
-                                                requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
-                                            }]);
+                                            await supabase.from('meeting_actions').insert([
+                                                {
+                                                    meeting_id: meetingId,
+                                                    type: 'kick',
+                                                    target_participant_id: confirmKick.participantId,
+                                                    status: 'pending',
+                                                    requested_by: jitsiApi?.myUserId && jitsiApi.myUserId()
+                                                }
+                                            ]);
                                         }
                                         if ((isHost || isAdmin) && meetingId && confirmKick.displayName) {
                                             const { data: row } = await supabase.from('meetings').select('banned_display_names').eq('id', meetingId).single();

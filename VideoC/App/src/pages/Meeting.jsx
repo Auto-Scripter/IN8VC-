@@ -462,6 +462,7 @@ const MeetingPage = () => {
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const inactivityTimer = useRef(null);
     const [hostParticipantId, setHostParticipantId] = useState(null);
+    
 
     const showToast = useCallback((toastData) => {
         setActiveToast({ id: Date.now(), ...toastData });
@@ -510,24 +511,6 @@ const MeetingPage = () => {
 
             const joinAsGuest = localStorage.getItem('joinAsGuest') === 'true';
             const storedGuestName = localStorage.getItem('userName') || 'Guest';
-            if (!currentUser && joinAsGuest) {
-                // Guest flow: skip DB fetch (RLS blocks unauthenticated) and proceed to Jitsi
-                console.info('[Meeting] Guest flow: proceeding without DB fetch');
-                setActiveMeeting({
-                    id: meetingId,
-                    displayName: storedGuestName,
-                    isHost: false,
-                    password: null,
-                    startWithAudioMuted: !(localStorage.getItem('guestJoinAudio') === 'true'),
-                    startWithVideoMuted: !(localStorage.getItem('guestJoinVideo') === 'true'),
-                    prejoinPageEnabled: true,
-                });
-                setCanJoinMeeting(true);
-                setIsWaitingForHost(false);
-                if (!jitsiApi) setIsJitsiLoading(true);
-                setIsPageLoading(false);
-                return;
-            }
 
             setIsPageLoading(true);
             try {
@@ -683,7 +666,31 @@ const handleApiReady = useCallback((api) => {
             const localIsHost = !!activeMeeting?.isHost;
             if (localIsHost && e?.id) {
                 setHostParticipantId(e.id);
-                try { await supabase.from('meetings').update({ host_participant_id: e.id }).eq('id', activeMeeting.id); } catch (_) {}
+                try {
+                    // Save host participant id
+                    await supabase.from('meetings').update({ host_participant_id: e.id }).eq('id', activeMeeting.id);
+                    // Ensure admin arrays include the host so all clients badge correctly
+                    const { data: row } = await supabase
+                      .from('meetings')
+                      .select('admin_ids, admin_display_names, host_name')
+                      .eq('id', activeMeeting.id)
+                      .single();
+                    const ids = new Set(Array.isArray(row?.admin_ids) ? row.admin_ids : []);
+                    ids.add(e.id);
+                    const normalize = (s) => {
+                        let v = (s || '').toString();
+                        v = v.replace(/\s*\([^)]*\)\s*$/g, '');
+                        try { v = v.normalize('NFKD').replace(/[\u0300-\u036f]/g, ''); } catch (_) {}
+                        v = v.replace(/\s+/g, ' ').trim().toLowerCase();
+                        return v;
+                    };
+                    const names = new Set(Array.isArray(row?.admin_display_names) ? row.admin_display_names : []);
+                    names.add(normalize(activeMeeting?.displayName || ''));
+                    const nextHostName = row?.host_name || activeMeeting?.displayName || null;
+                    await supabase.from('meetings')
+                      .update({ admin_ids: Array.from(ids), admin_display_names: Array.from(names), host_name: nextHostName })
+                      .eq('id', activeMeeting.id);
+                } catch (_) {}
             }
         };
         api.addEventListener('videoConferenceJoined', onJoined);
@@ -751,6 +758,11 @@ useEffect(() => {
             .channel(`meeting-${activeMeeting.id}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'meetings', filter: `id=eq.${activeMeeting.id}` }, (payload) => {
             const data = payload.new || payload.old || {};
+            // Share host participant id with all clients so sidebar can badge
+            if (data.host_participant_id) {
+                setHostParticipantId(data.host_participant_id);
+            }
+            // Roles: we continue to respect admin arrays in DB for universal badging
             const admins = Array.isArray(data.admin_ids) ? data.admin_ids : [];
             const normalize = (s) => {
                 let v = (s || '').toString();
@@ -762,20 +774,6 @@ useEffect(() => {
             const adminNames = Array.isArray(data.admin_display_names) ? data.admin_display_names.map(n => normalize(n)) : [];
             setAdminIds(admins);
             setAdminDisplayNames(adminNames);
-            // determine if current user is admin (host always admin)
-            const localId = jitsiApi?.myUserId?.() || null;
-            // use same normalization as sidebar
-            const localDisplay = normalize(activeMeeting?.displayName || userName || '');
-            const isAdminNow = !!(activeMeeting?.isHost || (localId && admins.includes(localId)) || (localDisplay && adminNames.includes(localDisplay)));
-            if (prevIsAdminRef.current !== isAdminNow) {
-                if (isAdminNow) {
-                    showToast({ title: 'Role updated', message: 'You are now an admin.', type: 'success' });
-                } else if (prevIsAdminRef.current && !isAdminNow) {
-                    showToast({ title: 'Role updated', message: 'Your admin rights were removed.', type: 'info' });
-                }
-                prevIsAdminRef.current = isAdminNow;
-            }
-            setIsCurrentAdmin(isAdminNow);
             // Ban enforcement: if my displayName is banned, end locally and block
             const banned = Array.isArray(data.banned_display_names) ? data.banned_display_names : [];
             const myName = (activeMeeting?.displayName || userName || 'Guest').trim().toLowerCase();
@@ -813,6 +811,8 @@ useEffect(() => {
         .subscribe();
         return () => { supabase.removeChannel(channel); };
     }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName, activeMeeting?.isHost, canJoinMeeting]);
+
+    // Socket.IO removed: roles derive from Supabase-only to prevent websocket errors when no socket server is running
 
     // Host handler to flip the Firestore flag; all clients react via onSnapshot
     const handleToggleWhiteboard = useCallback(async () => {
@@ -862,6 +862,19 @@ useEffect(() => {
                         case 'stream-stop':
                             jitsiApi.executeCommand('stopRecording', 'stream');
                             break;
+                        case 'end-meeting': {
+                            try {
+                                const list = Array.isArray(jitsiApi.getParticipantsInfo?.()) ? jitsiApi.getParticipantsInfo() : [];
+                                for (const p of list) {
+                                    if (p && p.participantId && p.participantId !== (jitsiApi.myUserId && jitsiApi.myUserId())) {
+                                        try { jitsiApi.executeCommand('kickParticipant', p.participantId); } catch (_) {}
+                                    }
+                                }
+                            } catch (_) {}
+                            // Finally hang up host
+                            try { jitsiApi.executeCommand('hangup'); } catch (_) {}
+                            break;
+                        }
                         default:
                             break;
                     }
@@ -873,6 +886,22 @@ useEffect(() => {
             .subscribe();
         return () => { supabase.removeChannel(chan); };
     }, [activeMeeting?.id, activeMeeting?.isHost, jitsiApi]);
+
+    // All participants: react to end-meeting to exit locally (works even if host is absent)
+    useEffect(() => {
+        if (!activeMeeting?.id || !jitsiApi) return;
+        const chanAll = supabase
+            .channel(`actions-all-${activeMeeting.id}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'meeting_actions', filter: `meeting_id=eq.${activeMeeting.id}` }, async ({ new: action }) => {
+                if (!action || action.type !== 'end-meeting') return;
+                try { jitsiApi.executeCommand('hangup'); } catch (_) {}
+                // Also dispose just in case
+                try { jitsiApi.dispose(); } catch (_) {}
+                navigate('/meeting');
+            })
+            .subscribe();
+        return () => { supabase.removeChannel(chanAll); };
+    }, [activeMeeting?.id, jitsiApi, navigate]);
 
 
    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {
@@ -1000,7 +1029,9 @@ useEffect(() => {
                     isHost={activeMeeting.isHost}
                     isAdmin={isCurrentAdmin}
                     localDisplayName={activeMeeting.displayName}
+                    hostName={activeMeeting.host_name}
                     meetingId={activeMeeting.id} adminIds={adminIds} adminDisplayNames={adminDisplayNames} 
+                    hostParticipantId={hostParticipantId}
                     showToast={showToast}/>
             ) : null}
             <div className="fixed top-5 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5 w-full max-w-sm px-4 sm:px-0 z-[60]"><AnimatePresence>{activeToast && <Toast key={activeToast.id} toast={activeToast} onClose={() => setActiveToast(null)} />}</AnimatePresence></div>

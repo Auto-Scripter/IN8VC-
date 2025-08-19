@@ -134,6 +134,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
     const [streamSessionId, setStreamSessionId] = useState(null);
     const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
     const [isVideoSharing, setIsVideoSharing] = useState(false);
+    const [showLeaveModal, setShowLeaveModal] = useState(false);
     // Whiteboard state now comes from parent (Firestore-synced)
 
     const menuRef = useRef(null);
@@ -346,6 +347,50 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
 
     return (
         <>
+            <AnimatePresence>
+                {showLeaveModal && (
+                    <motion.div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowLeaveModal(false)}>
+                        <motion.div className="w-full max-w-sm bg-slate-800 border border-slate-700 rounded-xl p-5" initial={{ scale: 0.96, y: -10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} onClick={(e) => e.stopPropagation()}>
+                            <h3 className="text-lg font-semibold text-white mb-3">Exit meeting</h3>
+                            {(isHost || isAdmin) ? (
+                                <div className="space-y-2">
+                                    <button onClick={() => { setShowLeaveModal(false); onHangup && onHangup(); }} className="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">Leave meeting</button>
+                                    <button onClick={async () => {
+                                        try {
+                                            // If host, end directly via Jitsi
+                                            if (isHost) {
+                                                try {
+                                                    const list = Array.isArray(jitsiApi?.getParticipantsInfo?.()) ? jitsiApi.getParticipantsInfo() : [];
+                                                    for (const p of list) {
+                                                        if (p && p.participantId && p.participantId !== (jitsiApi.myUserId && jitsiApi.myUserId())) {
+                                                            try { jitsiApi.executeCommand('kickParticipant', p.participantId); } catch (_) {}
+                                                        }
+                                                    }
+                                                } catch (_) {}
+                                                try { jitsiApi.executeCommand('hangup'); } catch (_) {}
+                                                showToast && showToast({ title: 'Meeting ended', message: 'Ended for all participants.', type: 'success' });
+                                            } else {
+                                                // Non-host admin: request host to end
+                                                const meetingId = window.location.pathname.split('/').pop();
+                                                const { supabase } = await import('../supabase');
+                                                await supabase.from('meeting_actions').insert([{ meeting_id: meetingId, type: 'end-meeting', status: 'pending', requested_by: jitsiApi?.myUserId && jitsiApi.myUserId() }]);
+                                                showToast && showToast({ title: 'Request sent', message: 'Asked host to end the meeting.', type: 'info' });
+                                            }
+                                        } catch (_) {
+                                            showToast && showToast({ title: 'Error', message: 'Could not end meeting.', type: 'error' });
+                                        }
+                                        setShowLeaveModal(false);
+                                    }} className="w-full px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white">End meeting for all</button>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <button onClick={() => { setShowLeaveModal(false); onHangup && onHangup(); }} className="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white">Leave meeting</button>
+                                </div>
+                            )}
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
             {isStreamModalOpen && (
                 <LiveStreamModal
                     onStart={handleStartStream}
@@ -458,7 +503,7 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                         </AnimatePresence>
                     </div>
 
-                    <ControlButtonWithTooltip onClick={onHangup} tooltip="Leave Meeting" className="bg-red-600 text-white hover:bg-red-500">
+                    <ControlButtonWithTooltip onClick={() => setShowLeaveModal(true)} tooltip="Leave Meeting" className="bg-red-600 text-white hover:bg-red-500">
                         <PhoneOff size={22} />
                     </ControlButtonWithTooltip >
 
