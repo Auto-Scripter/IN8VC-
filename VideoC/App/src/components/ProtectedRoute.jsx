@@ -18,7 +18,8 @@ const ProtectedRoute = ({ children, requiredRole, fallbackTo = '/home' }) => {
     if (meetingMatch && meetingMatch[1]) {
       // If guest flow initiated, allow access directly
       const joinAsGuest = localStorage.getItem('joinAsGuest') === 'true';
-      if (joinAsGuest) {
+      const guestState = location.state && (location.state.guest === true);
+      if (joinAsGuest || guestState) {
         return children;
       }
       return <Navigate to={`/guest/${meetingMatch[1]}`} replace />;

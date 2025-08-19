@@ -197,72 +197,59 @@ const NEW_MeetingSidebar = ({ isOpen, setIsOpen, jitsiApi, meetingLink, isHost, 
             return;
         }
         const rawList = Array.isArray(jitsiApi.getParticipantsInfo()) ? jitsiApi.getParticipantsInfo() : [];
-        const dedupedMap = new Map();
+        // First pass: dedup by participantId
+        const byId = new Map();
         for (const p of rawList) {
-            if (!dedupedMap.has(p.participantId)) dedupedMap.set(p.participantId, p);
+            if (!byId.has(p.participantId)) byId.set(p.participantId, p);
         }
-            const deduped = Array.from(dedupedMap.values()).map(p => ({
-                ...p,
-                formattedDisplayName: p.formattedDisplayName || p.displayName || 'User'
-            }));
-
-        let finalList = [];
-        if (isHost || isAdmin) {
-            let effectiveLocalId = localParticipantId;
-            if (!effectiveLocalId) {
-                const byName = deduped.find(p => p.formattedDisplayName === localDisplayName || p.displayName === localDisplayName);
-                if (byName) effectiveLocalId = byName.participantId;
+        // Second pass: dedup by normalized name (handles cases where Jitsi reports duplicate entries for same user)
+        const byName = new Map();
+        for (const p of byId.values()) {
+            const display = (p.formattedDisplayName || p.displayName || 'User');
+            const norm = normalizeName(display);
+            const existing = byName.get(norm);
+            if (!existing) {
+                byName.set(norm, p);
+            } else {
+                // Prefer the local participant or the one matching hostParticipantId
+                const pickLocal = (cand) => cand && cand.participantId && cand.participantId === localParticipantId;
+                const pickHost = (cand) => cand && cand.participantId && hostParticipantId && cand.participantId === hostParticipantId;
+                const chosen = pickLocal(p) || pickHost(p) ? p : (pickLocal(existing) || pickHost(existing) ? existing : existing);
+                byName.set(norm, chosen);
             }
-            const local = deduped.find(p => p.participantId === effectiveLocalId) || null;
-            const others = deduped
-                .filter(p => p.participantId !== effectiveLocalId)
-                .map(p => {
-                    const name = normalizeName(p.formattedDisplayName || p.displayName);
-                    const isAdminById = adminIdsSet.has(p.participantId);
-                    const isAdminByName = adminNamesSet.has(name);
-                    const isMod = (
-                        moderatorIds.has(p.participantId) ||
-                        p.isModerator ||
-                        p.role === 'moderator' ||
-                        isAdminById ||
-                        isAdminByName ||
-                        (hostParticipantId && p.participantId === hostParticipantId)
-                    );
-                    return {
-                        ...p,
-                        isLocal: false,
-                        isModerator: isMod,
-                    };
-                });
-            const selfDisplay = (local?.formattedDisplayName || local?.displayName || localDisplayName || 'You');
-            const adminEntry = {
-                participantId: effectiveLocalId || 'local-admin-host',
-                formattedDisplayName: selfDisplay,
-                isLocal: true,
-                isModerator: true,
-            };
-            finalList = [adminEntry, ...others];
-        } else {
-            finalList = deduped.map(p => {
-                const name = normalizeName(p.formattedDisplayName || p.displayName);
-                const isAdminById = adminIdsSet.has(p.participantId);
-                const isAdminByName = adminNamesSet.has(name);
-                const isMod = (
-                    moderatorIds.has(p.participantId) ||
-                    p.isModerator ||
-                    p.role === 'moderator' ||
-                    isAdminById ||
-                    isAdminByName ||
-                    (hostParticipantId && p.participantId === hostParticipantId)
-                );
-                return {
-                    ...p,
-                    isModerator: isMod,
-                };
-            });
         }
+        const deduped = Array.from(byName.values()).map(p => ({
+            ...p,
+            formattedDisplayName: p.formattedDisplayName || p.displayName || 'User'
+        }));
 
-        setParticipants(finalList);
+        // Mark local participant and moderator flags without duplicating entries
+        const localId = localParticipantId;
+        // Final pass: drop any ghost tiles that are missing essential fields
+        const ghostFree = deduped.filter(p => p && p.participantId && (p.formattedDisplayName || p.displayName));
+
+        const mapped = ghostFree.map(p => {
+            const name = normalizeName(p.formattedDisplayName || p.displayName);
+            const isAdminById = adminIdsSet.has(p.participantId);
+            const isAdminByName = adminNamesSet.has(name);
+            const isMod = (
+                moderatorIds.has(p.participantId) ||
+                p.isModerator ||
+                p.role === 'moderator' ||
+                isAdminById ||
+                isAdminByName ||
+                (hostParticipantId && p.participantId === hostParticipantId) ||
+                (isHost || isAdmin) && (p.participantId === localId)
+            );
+            return {
+                ...p,
+                isLocal: p.participantId === localId,
+                formattedDisplayName: p.formattedDisplayName || p.displayName || 'User',
+                isModerator: isMod,
+            };
+        });
+
+        setParticipants(mapped);
     }, [jitsiApi, isHost, isAdmin, localDisplayName, localParticipantId, moderatorIds, hostParticipantId, adminIdsSet, adminNamesSet, normalizeName]);
 
     // Force refresh participant list immediately when admin sets change so badges update for all

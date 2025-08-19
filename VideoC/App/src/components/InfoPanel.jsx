@@ -6,23 +6,21 @@ import React, { useState, useEffect } from 'react';
 import { Video, Clock, CalendarDays } from 'lucide-react';
 // highlight-end
 
-// --- LiveClock Component (No change here) ---
+// --- LiveClock Component (dynamic) ---
 const LiveClock = () => {
     const [time, setTime] = useState(new Date());
     useEffect(() => {
         const timerId = setInterval(() => setTime(new Date()), 1000);
         return () => clearInterval(timerId);
     }, []);
-    // Using current time: Saturday, August 2, 2025 12:13 AM IST
-    const timeString = time.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const timeString = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     const [currentTime, ampm] = timeString.split(' ');
-    const formattedDate = "Saturday, 2 August 2025";
+    const formattedDate = time.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     return (
         <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/70 p-4 rounded-xl border border-slate-700/80 text-center shadow-lg">
             <p className="text-4xl font-bold text-white tracking-wider">
-                {/* Displaying static time as per context */}
-                12:13
-                <span className="text-xl text-slate-400 ml-2 align-baseline">AM</span>
+                {currentTime}
+                <span className="text-xl text-slate-400 ml-2 align-baseline">{ampm}</span>
             </p>
             <p className="text-sm text-slate-400 mt-1">{formattedDate}</p>
         </div>
@@ -30,13 +28,9 @@ const LiveClock = () => {
 };
 
 // highlight-start
-// --- NEW Component to show a link to all meetings ---
-const ViewMeetingsLink = () => {
-    const handleViewAll = () => {
-        // In a real application, this would navigate to a "My Meetings" page.
-        // For example: window.location.href = '/my-meetings';
-        alert("Navigating to the 'All Scheduled Meetings' page...");
-    };
+// --- Link to view all scheduled meetings ---
+const ViewMeetingsLink = ({ onView }) => {
+    const handleViewAll = () => { if (typeof onView === 'function') onView(); };
 
     return (
         <div className="space-y-3 flex flex-col">
@@ -58,7 +52,28 @@ const ViewMeetingsLink = () => {
 };
 // highlight-end
 
-export const InfoPanel = ({ onQuickStart }) => {
+// --- Link to view all past meetings ---
+const ViewPastMeetingsLink = ({ onView }) => {
+    const handleViewAll = () => { if (typeof onView === 'function') onView(); };
+    return (
+        <div className="space-y-3 flex flex-col">
+            <button
+                onClick={handleViewAll}
+                className="group w-full flex items-center gap-4 p-4 bg-slate-800/60 rounded-xl border border-slate-700/80 backdrop-blur-sm text-left transition-all duration-200 hover:bg-slate-700/60 hover:border-slate-600"
+            >
+                <div className="p-2 bg-slate-700 rounded-lg">
+                    <CalendarDays size={20} className="text-slate-300" />
+                </div>
+                <div className="flex-grow">
+                    <p className="font-semibold text-white">View All Past Meetings</p>
+                    <p className="text-sm text-slate-400">Browse your recent calls and re-open details.</p>
+                </div>
+            </button>
+        </div>
+    );
+};
+
+export const InfoPanel = ({ onQuickStart, onSchedule, onViewScheduled, onViewPast }) => {
     return (
         <div className="flex flex-col space-y-6 h-full p-1">
             <div className="space-y-4">
@@ -75,11 +90,19 @@ export const InfoPanel = ({ onQuickStart }) => {
                     <Video size={20} className="transition-transform duration-300 group-hover:scale-110" />
                     <span>Start Instant Meeting</span>
                 </button>
+                <button
+                    onClick={onSchedule}
+                    className="w-full group flex items-center justify-center gap-3 py-3 px-6 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-slate-600 text-slate-100 transition-all"
+                >
+                    <Clock size={18} />
+                    <span>Schedule Meeting</span>
+                </button>
             </div>
             
             {/* highlight-start */}
             {/* The new component is added here */}
-            <ViewMeetingsLink />
+            <ViewMeetingsLink onView={onViewScheduled} />
+            <ViewPastMeetingsLink onView={onViewPast} />
             {/* highlight-end */}
 
         </div>

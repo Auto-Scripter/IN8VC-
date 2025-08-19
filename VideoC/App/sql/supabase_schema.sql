@@ -199,3 +199,26 @@ exception when duplicate_object then null; end $$;
 
 -- Realtime: enable from Dashboard → Database → Replication → Configure
 
+-- UPCOMING MEETINGS view (read-through to meetings via RLS)
+create or replace view public.upcoming_meetings as
+  select
+    id,
+    name,
+    purpose,
+    scheduled_for,
+    created_by,
+    created_at
+  from public.meetings
+  where
+    is_scheduled = true
+    and scheduled_for is not null
+    and scheduled_for > now();
+
+-- Helpful indexes for scheduling queries
+create index if not exists idx_meetings_scheduled_for
+  on public.meetings (scheduled_for)
+  where is_scheduled = true and scheduled_for is not null;
+
+create index if not exists idx_meetings_created_by
+  on public.meetings (created_by);
+

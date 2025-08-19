@@ -7,7 +7,7 @@ import {
     VideoIcon, Mail, Calendar, Clock, Video, X, Share2, Copy, Check,
     Users, Film, MessageSquare, ArrowLeft, User as UserIcon, KeyRound, ChevronLeft, ChevronRight,
     Mic, MicOff, VideoOff, PanelLeftOpen, Settings as SettingsIcon, Hand, MonitorUp, PhoneOff,
-    Presentation, Timer, HardDriveDownload, CalendarClock
+    Presentation, Timer, HardDriveDownload, CalendarClock, MoreHorizontal, FileText
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -89,7 +89,7 @@ const AnimatedBackground = () => {
     );
 };
 
-const ShareModal = ({ meetingLink, onClose }) => {
+const ShareModal = ({ meetingLink, onClose, onStart }) => {
     const [isCopied, setIsCopied] = useState(false);
     const handleCopy = () => {
         navigator.clipboard.writeText(meetingLink).then(() => {
@@ -108,7 +108,10 @@ const ShareModal = ({ meetingLink, onClose }) => {
                     <input type="text" readOnly value={meetingLink} className="flex-grow bg-transparent text-slate-300 text-sm outline-none px-2" />
                     <button onClick={handleCopy} className={`flex items-center justify-center gap-2 w-28 px-4 py-2 rounded-md text-sm font-semibold transition-all duration-200 ${isCopied ? 'bg-emerald-500' : 'bg-blue-600 hover:bg-blue-500'}`}>{isCopied ? <><Check size={16}/> Copied!</> : <><Copy size={16}/> Copy</>}</button>
                 </div>
-                <div className="flex items-center justify-center gap-4"><a href={`mailto:?subject=Invitation to join meeting&body=Join my meeting with this link: ${meetingLink}`} className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 hover:bg-slate-700 transition-colors px-4 py-2 rounded-lg"><Mail size={18} /><span>Email</span></a></div>
+                <div className="flex items-center justify-center gap-3">
+                    <button onClick={onStart} className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold">Start now</button>
+                    <a href={`mailto:?subject=Invitation to join meeting&body=Join my meeting with this link: ${meetingLink}`} className="flex items-center gap-2 text-sm text-slate-300 bg-slate-700/50 hover:bg-slate-700 transition-colors px-4 py-2 rounded-lg"><Mail size={18} /><span>Email</span></a>
+                </div>
             </motion.div>
         </motion.div>
     );
@@ -353,14 +356,14 @@ const CreateMeeting = ({ onSubmit, isLoading, initialUserName, navigate }) => {
                         <h2 className="text-3xl font-bold text-white">Start or Join a Meeting</h2>
                         <p className="text-slate-400 mt-2 mb-8 max-w-md mx-auto">Create a new meeting instantly, schedule one for later, or join using a code.</p>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
-                            <motion.button onClick={() => setView('startNow')} whileTap={{ scale: 0.98 }} className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg bg-blue-600 text-white font-semibold transition-colors hover:bg-blue-500">
+                        <div className="grid grid-cols-1 sm:grid-cols-1 gap-4 w-full max-w-md">
+                            <motion.button
+                                onClick={() => setView('startNow')}
+                                whileTap={{ scale: 0.98 }}
+                                className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg bg-blue-600 text-white font-semibold transition-colors hover:bg-blue-500"
+                            >
                                 <Video size={24} />
                                 <span>New Meeting</span>
-                            </motion.button>
-                             <motion.button onClick={() => setView('schedule')} whileTap={{ scale: 0.98 }} className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 font-semibold transition-colors hover:bg-slate-700">
-                                <Calendar size={24} />
-                                <span>Schedule for Later</span>
                             </motion.button>
                         </div>
                         
@@ -425,12 +428,36 @@ const MeetingPage = () => {
     const [isMeetingSidebarOpen, setIsMeetingSidebarOpen] = useState(true);
     const dashboardContainerRef = useRef(null);
     const [isJitsiLoading, setIsJitsiLoading] = useState(false);
+    const [canJoinMeeting, setCanJoinMeeting] = useState(false);
+    const [isWaitingForHost, setIsWaitingForHost] = useState(false);
     const [whiteboardOpen, setWhiteboardOpen] = useState(false);
     const [adminIds, setAdminIds] = useState([]);
     const [adminDisplayNames, setAdminDisplayNames] = useState([]);
     const [isCurrentAdmin, setIsCurrentAdmin] = useState(false);
     const prevIsAdminRef = useRef(false);
     const [adminJwt, setAdminJwt] = useState(undefined);
+    const [upcomingMeetings, setUpcomingMeetings] = useState([]);
+    const [pastMeetings, setPastMeetings] = useState([]);
+    const [viewScheduleModal, setViewScheduleModal] = useState(false);
+    const [viewPastModal, setViewPastModal] = useState(false);
+    const [isScheduleFormOpen, setIsScheduleFormOpen] = useState(false);
+    const [scheduleFormValues, setScheduleFormValues] = useState({
+        userName: '',
+        meetingTitle: '',
+        meetingPurpose: '',
+        meetingPassword: '',
+        scheduleDate: null,
+        scheduleTime: null,
+        micEnabled: true,
+        cameraEnabled: true,
+        waitingRoomEnabled: false,
+    });
+
+    // Details modal state for viewing full meeting information
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+    const [detailsMeeting, setDetailsMeeting] = useState(null);
+    const [isDetailsLoading, setIsDetailsLoading] = useState(false);
+    const [detailsError, setDetailsError] = useState(null);
 
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const inactivityTimer = useRef(null);
@@ -473,19 +500,45 @@ const MeetingPage = () => {
     useEffect(() => {
         const initializePage = async () => {
             if (!meetingId) return;
+            // If we're already in this meeting and have an API instance, do not
+            // re-run the heavy init. This avoids loader flicker on tab focus or
+            // background auth refreshes that update currentUser.
+            if (activeMeeting?.id === meetingId && jitsiApi) {
+                setIsPageLoading(false);
+                return;
+            }
 
-            if (!currentUser) {
+            const joinAsGuest = localStorage.getItem('joinAsGuest') === 'true';
+            const storedGuestName = localStorage.getItem('userName') || 'Guest';
+            if (!currentUser && joinAsGuest) {
+                // Guest flow: skip DB fetch (RLS blocks unauthenticated) and proceed to Jitsi
+                console.info('[Meeting] Guest flow: proceeding without DB fetch');
+                setActiveMeeting({
+                    id: meetingId,
+                    displayName: storedGuestName,
+                    isHost: false,
+                    password: null,
+                    startWithAudioMuted: !(localStorage.getItem('guestJoinAudio') === 'true'),
+                    startWithVideoMuted: !(localStorage.getItem('guestJoinVideo') === 'true'),
+                    prejoinPageEnabled: true,
+                });
+                setCanJoinMeeting(true);
+                setIsWaitingForHost(false);
+                if (!jitsiApi) setIsJitsiLoading(true);
+                setIsPageLoading(false);
                 return;
             }
 
             setIsPageLoading(true);
             try {
+                console.info('[Meeting] Fetching meeting row', { meetingId });
                 const { data: meetingData, error } = await supabase
                     .from('meetings')
                     .select('*')
                     .eq('id', meetingId)
                     .single();
                 if (!error && meetingData) {
+                    console.info('[Meeting] Meeting row loaded', { hasHostPid: !!meetingData.host_participant_id, isScheduled: meetingData.is_scheduled });
                     
                     const banned = Array.isArray(meetingData.banned_display_names) ? meetingData.banned_display_names : [];
                     const myName = (userName || 'Guest').trim().toLowerCase();
@@ -500,33 +553,58 @@ const MeetingPage = () => {
                     const localHostToken = localStorage.getItem(`hostToken_${meetingId}`);
                     const isUserTheHost = !!(localHostToken && localHostToken === meetingData.host_token);
 
+                    console.info('[Meeting] Role resolved', { isUserTheHost });
                     setActiveMeeting({
                         id: meetingId,
                         displayName: userName,
                         ...meetingData,
                         isHost: isUserTheHost
                     });
-                    // Generate admin JWT only if current user is host
+                    // Join gating & JWT
                     if (isUserTheHost) {
-                        try {
-                            const token = await createAdminJwt({ name: userName, email: currentUser?.email, avatar: currentUser?.user_metadata?.avatar_url });
-                            setAdminJwt(token);
-                        } catch (e) {
-                            console.error('Failed to create admin JWT:', e);
+                        console.info('[Meeting] Generating admin JWT…');
+                        setCanJoinMeeting(true);
+                        setIsWaitingForHost(false);
+                        if (!adminJwt) {
+                            try {
+                                const token = await createAdminJwt({ name: userName, email: currentUser?.email, avatar: currentUser?.user_metadata?.avatar_url });
+                                setAdminJwt(token);
+                                console.info('[Meeting] Admin JWT ready');
+                            } catch (e) {
+                                console.error('Failed to create admin JWT:', e);
+                            }
                         }
+                        if (!jitsiApi) setIsJitsiLoading(true);
                     } else {
                         setAdminJwt(undefined);
+                        if (meetingData.host_participant_id) {
+                            console.info('[Meeting] Host already present; allowing join');
+                            setCanJoinMeeting(true);
+                            setIsWaitingForHost(false);
+                            if (!jitsiApi) setIsJitsiLoading(true);
+                        } else {
+                            console.info('[Meeting] Waiting for host to join…');
+                            setCanJoinMeeting(false);
+                            setIsWaitingForHost(true);
+                            setIsJitsiLoading(false);
+                        }
                     }
-                    setIsJitsiLoading(true);
                 } else {
-                    showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
-                    navigate('/meeting');
+                    console.warn('[Meeting] Meeting fetch failed or not found', { error });
+                    if (!currentUser) {
+                        // Non-guest anonymous hit (no joinAsGuest flag): send to guest page
+                        navigate(`/guest/${meetingId}`, { replace: true });
+                    } else {
+                        showToast({ title: 'Error', message: 'Meeting not found.', type: 'error' });
+                        navigate('/meeting');
+                    }
                 }
             } catch (error) {
                 console.error("Supabase fetch error:", error);
                 showToast({ title: 'Error', message: 'Could not fetch meeting details.', type: 'error' });
                 navigate('/meeting');
             } finally {
+                console.info('[Meeting] initializePage complete');
                 setIsPageLoading(false);
             }
         };
@@ -535,9 +613,67 @@ const MeetingPage = () => {
         // CHANGED: The dependency array now correctly re-runs when currentUser is set.
     }, [meetingId, currentUser, navigate, userName]);
 
+    // Load user's meetings for dashboard lists
+    const fetchUserMeetings = useCallback(async () => {
+        if (!currentUser) return;
+        try {
+            const { data, error } = await supabase
+                .from('meetings')
+                .select('id,name,is_scheduled,scheduled_for,created_at')
+                .eq('created_by', currentUser.id)
+                .order('scheduled_for', { ascending: true, nullsFirst: false })
+                .order('created_at', { ascending: false });
+            if (error) throw error;
+            const rows = Array.isArray(data) ? data : [];
+            const now = new Date();
+            const upcoming = rows
+                .filter(m => m.is_scheduled && m.scheduled_for && new Date(m.scheduled_for) > now)
+                .sort((a, b) => new Date(a.scheduled_for) - new Date(b.scheduled_for));
+            const past = rows
+                .filter(m => (m.is_scheduled && m.scheduled_for && new Date(m.scheduled_for) <= now) || !m.is_scheduled)
+                .sort((a, b) => new Date(b.scheduled_for || b.created_at) - new Date(a.scheduled_for || a.created_at));
+            setUpcomingMeetings(upcoming);
+            setPastMeetings(past);
+        } catch (_) {
+            setUpcomingMeetings([]);
+            setPastMeetings([]);
+        }
+    }, [currentUser]);
+
+    useEffect(() => {
+        if (activeMeeting || !currentUser) return;
+        let cancelled = false;
+        (async () => {
+            await fetchUserMeetings();
+        })();
+        return () => { cancelled = true; };
+    }, [activeMeeting, currentUser, fetchUserMeetings]);
+
+    const openMeetingDetails = useCallback(async (id) => {
+        setIsDetailsOpen(true);
+        setIsDetailsLoading(true);
+        setDetailsError(null);
+        setDetailsMeeting(null);
+        try {
+            const { data, error } = await supabase
+                .from('meetings')
+                .select('*')
+                .eq('id', id)
+                .single();
+            if (error) throw error;
+            setDetailsMeeting(data || null);
+        } catch (e) {
+            console.error('Failed to load meeting details', e);
+            setDetailsError('Failed to load meeting details.');
+        } finally {
+            setIsDetailsLoading(false);
+        }
+    }, []);
+
 // In MeetingPage -> handleApiReady
 const handleApiReady = useCallback((api) => {
-    setJitsiApi(api);
+    // Avoid reassigning if the same API instance is passed again (tab visibility changes)
+    setJitsiApi(prev => (prev === api ? prev : api));
     // +++ STOP the Jitsi loader HERE +++
     setIsJitsiLoading(false);
     try {
@@ -551,27 +687,39 @@ const handleApiReady = useCallback((api) => {
             }
         };
         api.addEventListener('videoConferenceJoined', onJoined);
+        if (activeMeeting?.isHost) {
+            try { api.executeCommand('toggleLobby', true); } catch (_) {}
+        }
     } catch (_) {}
 }, [activeMeeting]);
 
 // Safety timeout for loader - if Jitsi doesn't initialize within 15 seconds, clear the loader
 useEffect(() => {
-    if (!activeMeeting) return;
-    
+    if (!activeMeeting?.id) return;
+
+    // Only trigger the loader when the meeting ID changes, not when other
+    // fields on the activeMeeting object are updated.
     setIsJitsiLoading(true);
     const timeout = setTimeout(() => {
         if (isJitsiLoading) {
             setIsJitsiLoading(false);
-            showToast({ 
-                title: 'Connection Issue', 
-                message: 'Meeting is taking longer than usual to load. Please check your internet connection.', 
-                type: 'warning' 
+            showToast({
+                title: 'Connection Issue',
+                message: 'Meeting is taking longer than usual to load. Please check your internet connection.',
+                type: 'warning'
             });
         }
     }, 15000);
-    
+
     return () => clearTimeout(timeout);
-}, [activeMeeting]);
+}, [activeMeeting?.id]);
+
+useEffect(() => {
+    if (!jitsiApi) return;
+    if (whiteboardOpen) {
+        try { jitsiApi.executeCommand('toggleWhiteboard'); } catch (_) {}
+    }
+}, [jitsiApi]);
 
 
     const showControlsAndResetTimer = useCallback(() => {
@@ -641,6 +789,16 @@ useEffect(() => {
                 return;
             }
 
+            // Allow participants to proceed when host joins
+            if (!activeMeeting?.isHost) {
+                const hostJoined = !!data.host_participant_id;
+                if (hostJoined && !canJoinMeeting) {
+                    setCanJoinMeeting(true);
+                    setIsWaitingForHost(false);
+                    setIsJitsiLoading(true);
+                }
+            }
+
             // Whiteboard sync
             const targetOpen = !!data.whiteboard_open;
             setWhiteboardOpen((prev) => {
@@ -654,7 +812,7 @@ useEffect(() => {
         })
         .subscribe();
         return () => { supabase.removeChannel(channel); };
-    }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName, activeMeeting?.isHost]);
+    }, [activeMeeting?.id, jitsiApi, navigate, showToast, userName, activeMeeting?.isHost, canJoinMeeting]);
 
     // Host handler to flip the Firestore flag; all clients react via onSnapshot
     const handleToggleWhiteboard = useCallback(async () => {
@@ -753,11 +911,8 @@ useEffect(() => {
             setNewMeetingLink(link);
             showToast({ title: 'Success!', message: `Meeting ${scheduleOption === 'now' ? 'created' : 'scheduled'}!`, type: 'success' });
             
-            if (scheduleOption === 'now') {
-                navigate(`/meeting/${data.id}`);
-            } else {
-                setIsShareModalOpen(true);
-            }
+            // Always show share modal first; user explicitly starts when ready
+            setIsShareModalOpen(true);
         } catch (error) {
             console.error("Error creating meeting: ", error);
             showToast({ title: 'Error', message: 'Failed to create meeting.', type: 'error' });
@@ -775,14 +930,53 @@ useEffect(() => {
             name: `Instant Meeting - ${new Date().toLocaleDateString()}`, purpose: 'Quick call', password: '',
             isScheduled: false, scheduledFor: null, hostName: userName, startWithAudioMuted: false,
             startWithVideoMuted: false, 
-            prejoinPageEnabled: false, // Ensure quick start also skips prejoin
+            prejoinPageEnabled: false,
         };
         handleCreateMeeting(quickStartData, 'now');
     };
 
+    // Handlers for Quick Action: Schedule Meeting modal
+    const handleScheduleInputChange = (e) => {
+        const { name, value } = e.target;
+        setScheduleFormValues(prev => ({ ...prev, [name]: value }));
+    };
+    const handleScheduleDateChange = (e) => {
+        const { name, value } = e.target;
+        setScheduleFormValues(prev => ({ ...prev, [name]: value }));
+    };
+    const handleScheduleFormSubmit = (e) => {
+        e.preventDefault();
+        const v = scheduleFormValues;
+        if (!(v.scheduleDate && v.scheduleTime)) {
+            showToast({ title: 'Missing time', message: 'Please select both date and time.', type: 'warning' });
+            return;
+        }
+        const finalDateTime = new Date(
+            v.scheduleDate.getFullYear(),
+            v.scheduleDate.getMonth(),
+            v.scheduleDate.getDate(),
+            v.scheduleTime.getHours(),
+            v.scheduleTime.getMinutes()
+        );
+        const formData = {
+            name: v.meetingTitle || 'Scheduled Meeting',
+            purpose: v.meetingPurpose,
+            password: v.meetingPassword,
+            isScheduled: true,
+            scheduledFor: finalDateTime,
+            hostName: v.userName || userName,
+            startWithAudioMuted: !v.micEnabled,
+            startWithVideoMuted: !v.cameraEnabled,
+            prejoinPageEnabled: v.waitingRoomEnabled,
+        };
+        handleCreateMeeting(formData, 'later');
+        setIsScheduleFormOpen(false);
+        // refresh lists so "View All Scheduled Meetings" shows the new entry immediately
+        fetchUserMeetings();
+    };
+
     const handleEndMeeting = useCallback(() => {
         showToast({ title: 'Meeting Ended', message: 'You have left the meeting.', type: 'info' });
-        // Clear guest flags on exit
         localStorage.removeItem('joinAsGuest');
         localStorage.removeItem('guestJoinAudio');
         localStorage.removeItem('guestJoinVideo');
@@ -806,33 +1000,207 @@ useEffect(() => {
                     isHost={activeMeeting.isHost}
                     isAdmin={isCurrentAdmin}
                     localDisplayName={activeMeeting.displayName}
-                    meetingId={activeMeeting.id}
-                    adminIds={adminIds}
-                    adminDisplayNames={adminDisplayNames}
-                    showToast={showToast}
-/>
-
+                    meetingId={activeMeeting.id} adminIds={adminIds} adminDisplayNames={adminDisplayNames} 
+                    showToast={showToast}/>
             ) : null}
             <div className="fixed top-5 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-5 w-full max-w-sm px-4 sm:px-0 z-[60]"><AnimatePresence>{activeToast && <Toast key={activeToast.id} toast={activeToast} onClose={() => setActiveToast(null)} />}</AnimatePresence></div>
-            <AnimatePresence>{isShareModalOpen && <ShareModal meetingLink={newMeetingLink} onClose={() => setIsShareModalOpen(false)} />}</AnimatePresence>
+            <AnimatePresence>{isShareModalOpen && <ShareModal meetingLink={newMeetingLink} onClose={() => setIsShareModalOpen(false)} onStart={() => { setIsShareModalOpen(false); if (newMeetingLink) { const id = newMeetingLink.split('/').pop(); navigate(`/meeting/${id}`); } }} />}</AnimatePresence>
+
+            <AnimatePresence>
+              {viewScheduleModal && (
+                <motion.div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewScheduleModal(false)}>
+                  <motion.div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl p-5" initial={{ scale: 0.96, y: -10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} onClick={(e)=>e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold">Scheduled Meetings</h3>
+                      <button onClick={()=>setViewScheduleModal(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-800">
+                      {upcomingMeetings.length === 0 ? (
+                        <p className="text-slate-400 text-sm">No scheduled meetings.</p>
+                      ) : (
+                        upcomingMeetings.map(m => (
+                          <div key={m.id} className="py-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-medium text-slate-200">{m.name || 'Meeting'}</p>
+                              <p className="text-xs text-slate-400">{new Date(m.scheduled_for).toLocaleString()}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => openMeetingDetails(m.id)} className="p-2 rounded-md hover:bg-slate-700" title="View details"><MoreHorizontal size={18} /></button>
+                              <button onClick={() => navigate(`/meeting/${m.id}`)} className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-sm">Join</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {isScheduleFormOpen && (
+                <motion.div
+                  className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsScheduleFormOpen(false)}
+                >
+                  <motion.div
+                    className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-xl p-5"
+                    initial={{ scale: 0.96, y: -10 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.96, y: 10 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MeetingDetailsForm
+                      isScheduling={true}
+                      onSubmit={handleScheduleFormSubmit}
+                      setView={() => setIsScheduleFormOpen(false)}
+                      formValues={scheduleFormValues}
+                      handleInputChange={handleScheduleInputChange}
+                      handleDateChange={handleScheduleDateChange}
+                      isLoading={isLoading}
+                    />
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {viewPastModal && (
+                <motion.div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewPastModal(false)}>
+                  <motion.div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl p-5" initial={{ scale: 0.96, y: -10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} onClick={(e)=>e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-semibold">Past Meetings</h3>
+                      <button onClick={()=>setViewPastModal(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-800">
+                      {pastMeetings.length === 0 ? (
+                        <p className="text-slate-400 text-sm">No past meetings.</p>
+                      ) : (
+                        pastMeetings.map(m => (
+                          <div key={m.id} className="py-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-medium text-slate-200">{m.name || 'Meeting'}</p>
+                              <p className="text-xs text-slate-400">{new Date(m.scheduled_for || m.created_at).toLocaleString()}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => openMeetingDetails(m.id)} className="p-2 rounded-md hover:bg-slate-700" title="View details"><MoreHorizontal size={18} /></button>
+                              <button onClick={() => navigate(`/meeting/${m.id}`)} className="px-3 py-1.5 rounded-md bg-slate-700 hover:bg-slate-600 text-sm">Open</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+
+            </AnimatePresence>
+
+            {/* Meeting Details Modal (page-level) */}
+            <AnimatePresence>
+              {isDetailsOpen && (
+                <motion.div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsDetailsOpen(false)}>
+                  <motion.div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-xl p-5" initial={{ scale: 0.96, y: -10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} onClick={(e)=>e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <FileText size={18} className="text-blue-400" />
+                        <h3 className="text-lg font-semibold">Meeting Details</h3>
+                      </div>
+                      <button onClick={()=>setIsDetailsOpen(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                    </div>
+                    {isDetailsLoading ? (
+                      <p className="text-slate-400 text-sm">Loading…</p>
+                    ) : detailsError ? (
+                      <p className="text-red-400 text-sm">{detailsError}</p>
+                    ) : detailsMeeting ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs text-slate-400">Title</p>
+                          <p className="text-slate-200 font-medium">{detailsMeeting.name || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-slate-400">Purpose</p>
+                          <p className="text-slate-300 whitespace-pre-wrap">{detailsMeeting.purpose || '—'}</p>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-slate-400">Meeting ID</p>
+                            <p className="text-slate-300 font-mono text-sm break-all">{detailsMeeting.id}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-400">Host</p>
+                            <p className="text-slate-300">{detailsMeeting.host_name || '—'}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-slate-400">Scheduled For</p>
+                            <p className="text-slate-300">{detailsMeeting.scheduled_for ? new Date(detailsMeeting.scheduled_for).toLocaleString() : '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-400">Created At</p>
+                            <p className="text-slate-300">{detailsMeeting.created_at ? new Date(detailsMeeting.created_at).toLocaleString() : '—'}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-slate-400">Audio Starts Muted</p>
+                            <p className="text-slate-300">{detailsMeeting.start_with_audio_muted ? 'Yes' : 'No'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-400">Video Starts Muted</p>
+                            <p className="text-slate-300">{detailsMeeting.start_with_video_muted ? 'Yes' : 'No'}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-xs text-slate-400">Prejoin Page</p>
+                            <p className="text-slate-300">{detailsMeeting.prejoin_page_enabled ? 'Enabled' : 'Disabled'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-400">Whiteboard Open</p>
+                            <p className="text-slate-300">{detailsMeeting.whiteboard_open ? 'Yes' : 'No'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-sm">No details available.</p>
+                    )}
+                    <div className="flex justify-end gap-2 mt-5">
+                      <button onClick={()=>setIsDetailsOpen(false)} className="px-3 py-1.5 rounded-md bg-slate-700 hover:bg-slate-600 text-sm">Close</button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div className="flex-1 flex flex-col h-screen relative">
                  {activeMeeting && !isMeetingSidebarOpen && (
                        <button onClick={() => setIsMeetingSidebarOpen(true)} className="absolute top-4 left-4 z-20 p-2 bg-slate-700/50 rounded-lg text-white hover:bg-slate-600" title="Open Sidebar">
                              <PanelLeftOpen size={20} />
                        </button>
                  )}
-                <main className={`flex-1 flex flex-col h-full transition-all duration-300 ${activeMeeting ? 'p-0' : 'p-4 sm:p-6'}`}>
+                <main className={`flex-1 flex flex-col h-full transition-all duration-300 ${activeMeeting ? 'p-0' : 'p-4 sm:p-6 overflow-y-auto'}`}>
                     <AnimatePresence mode="wait">
                         {activeMeeting ? (
         <motion.div key="meeting-view" className="w-full h-full flex flex-col bg-slate-950 relative" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{duration: 0.4}}>
             
-            {/* +++ Render LoadingScreen when Jitsi is loading +++ */}
             {isJitsiLoading && <LoadingScreen />}
+            {isWaitingForHost && !canJoinMeeting && (
+                <div className="absolute inset-0 bg-slate-900/95 z-[100] flex items-center justify-center">
+                    <div className="text-center">
+                        <p className="text-xl font-semibold text-white">Waiting for host to start the meeting…</p>
+                        <p className="text-slate-400 mt-2">You will join automatically once the host joins.</p>
+                    </div>
+                </div>
+            )}
 
-            {/* Hide the Jitsi container until it's fully loaded */}
+            {((activeMeeting.isHost && !!adminJwt) || (!activeMeeting.isHost && canJoinMeeting)) && (
             <div className="flex-grow w-full min-h-[400px]" style={{ visibility: isJitsiLoading ? 'hidden' : 'visible' }}>
     <JitsiMeet
-        domain="meet.jit.si" 
+        domain="meet.in8.com"
         roomName={activeMeeting.id} 
         displayName={activeMeeting.displayName || userName}
         password={activeMeeting.password} 
@@ -840,13 +1208,14 @@ useEffect(() => {
         onApiReady={handleApiReady}
         startWithVideoMuted={(() => { const g = localStorage.getItem('joinAsGuest') === 'true'; if (!g) return activeMeeting.startWithVideoMuted; const videoOn = localStorage.getItem('guestJoinVideo') === 'true'; return !videoOn; })()}
         startWithAudioMuted={(() => { const g = localStorage.getItem('joinAsGuest') === 'true'; if (!g) return activeMeeting.startWithAudioMuted; const audioOn = localStorage.getItem('guestJoinAudio') === 'true'; return !audioOn; })()}
-        prejoinPageEnabled={activeMeeting.prejoinPageEnabled} 
+        prejoinPageEnabled={false}
         toolbarButtons={EMPTY_TOOLBAR}
         showToast={showToast}
         noiseSuppressionEnabled={true} 
         jwt={adminJwt}
 />
 </div>
+            )}
                                 <div 
                                     className={`absolute top-0 left-0 w-full h-full z-10 
                                         ${areControlsVisible ? 'pointer-events-none' : 'pointer-events-auto'}`
@@ -870,25 +1239,42 @@ useEffect(() => {
 )}
                             </motion.div>
                         ) : (
-                            <div key="dashboard-view" ref={dashboardContainerRef} className="h-full flex flex-col gap-6">
-                                <div className="dashboard-header">
-                                    <h1 className="text-3xl font-bold text-white">Meeting Dashboard</h1>
-                                    <p className="text-slate-400 mt-1">Welcome back, {userName}!</p>
+                            <div key="dashboard-view" ref={dashboardContainerRef} className="min-h-full flex flex-col gap-6">
+                                <div className="flex items-baseline justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">Welcome, {userName}! <span className="text-blue-400">👋</span></h1>
+                                        {((Array.isArray(currentUser?.app_metadata?.roles) && currentUser.app_metadata.roles.includes('admin')) || currentUser?.user_metadata?.role === 'admin') && (
+                                            <span className="px-2 py-1 rounded-full text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40">Admin</span>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-                                    <StatCard title="Meetings Attended" value="28" icon={Presentation} color="bg-blue-500" />
-                                    <StatCard title="Total Time" value="12h 45m" icon={Timer} color="bg-purple-500" />
-                                    <StatCard title="Recordings Saved" value="7" icon={HardDriveDownload} color="bg-green-500" />
-                                    <StatCard title="Upcoming" value="3" icon={CalendarClock} color="bg-orange-500" />
-                                </div>
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow min-h-0 overflow-y-auto hide-scrollbar">
-                                    <div className="lg:col-span-2 min-h-[500px] lg:min-h-0">
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="lg:col-span-2 min-h-[calc(100vh-4rem]">
                                         <CreateMeeting onSubmit={handleCreateMeeting} isLoading={isLoading} initialUserName={userName} navigate={navigate} />
                                     </div>
-                                    <div className="lg:col-span-1 min-h-[500px] lg:min-h-0">
-                                        <InfoPanel onQuickStart={handleQuickStart} />
+                                    <div className="lg:col-span-1 min-h-[calc(100vh-12rem)]">
+                                        <InfoPanel 
+                                            onQuickStart={handleQuickStart}
+                                            onSchedule={() => {
+                                                setScheduleFormValues({
+                                                    userName: userName || '',
+                                                    meetingTitle: '',
+                                                    meetingPurpose: '',
+                                                    meetingPassword: '',
+                                                    scheduleDate: null,
+                                                    scheduleTime: null,
+                                                    micEnabled: true,
+                                                    cameraEnabled: true,
+                                                    waitingRoomEnabled: false,
+                                                });
+                                                setIsScheduleFormOpen(true);
+                                            }}
+                                            onViewScheduled={() => setViewScheduleModal(true)}
+                                            onViewPast={() => setViewPastModal(true)}
+                                        />
                                     </div>
                                 </div>
+                                {/* Removed Upcoming/Past lists in favor of modals */}
                             </div>
                         )}
                     </AnimatePresence>

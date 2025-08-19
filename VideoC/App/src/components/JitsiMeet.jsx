@@ -1,6 +1,25 @@
 import React, { useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 
+// Keep a lightweight pool of Jitsi API instances keyed by roomName so brief unmounts
+// (e.g., tab switches, fast refresh) don't tear down the meeting.
+const jitsiInstancePool = new Map(); // roomName -> { api }
+function getParkingLot() {
+    let lot = document.getElementById('jitsi-parking-lot');
+    if (!lot) {
+        lot = document.createElement('div');
+        lot.id = 'jitsi-parking-lot';
+        lot.style.position = 'fixed';
+        lot.style.left = '-99999px';
+        lot.style.top = '0';
+        lot.style.width = '1px';
+        lot.style.height = '1px';
+        lot.style.overflow = 'hidden';
+        document.body.appendChild(lot);
+    }
+    return lot;
+}
+
 const JitsiMeet = React.memo(({
     roomName,
     displayName,
@@ -19,19 +38,23 @@ const JitsiMeet = React.memo(({
 }) => {
     const jitsiContainerRef = useRef(null);
     const apiRef = useRef(null);
+    const joinedRef = useRef(false);
+    const retriedRef = useRef(false);
 
     useEffect(() => {
         if (!jitsiContainerRef.current) return;
         
         const effectiveDomain = domain;
 
-        const script = document.createElement('script');
-        script.src = `https://${effectiveDomain}/external_api.js`;
-        script.async = true;
-        
-        script.onerror = () => console.error(`Failed to load Jitsi script from: https://${effectiveDomain}/external_api.js`);
-        
-        document.head.appendChild(script);
+        let script = null;
+        const needToLoadScript = typeof window.JitsiMeetExternalAPI === 'undefined';
+        if (needToLoadScript) {
+            script = document.createElement('script');
+            script.src = `https://${effectiveDomain}/external_api.js`;
+            script.async = true;
+            script.onerror = () => console.error(`Failed to load Jitsi script from: https://${effectiveDomain}/external_api.js`);
+            document.head.appendChild(script);
+        }
 
         const failTimer = setTimeout(() => {
             showToast && showToast({
@@ -41,7 +64,7 @@ const JitsiMeet = React.memo(({
             });
         }, 15000);
 
-        script.onload = () => {
+        const onReady = () => {
             if (!window.JitsiMeetExternalAPI) {
                 console.error("Jitsi API script not loaded.");
                 clearTimeout(failTimer);
@@ -74,59 +97,130 @@ const JitsiMeet = React.memo(({
                 options.jwt = jwt;
             }
             
-            try {
-                apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options);
-            } catch (e) {
-                console.error('Failed to create JitsiMeetExternalAPI:', e);
-                showToast && showToast({ title: 'Embed blocked', message: 'The Jitsi server refused to be embedded. Check X-Frame-Options / CSP (frame-ancestors).', type: 'error' });
-                clearTimeout(failTimer);
-                return;
-            }
-
-            const onIframeReady = () => {
-                clearTimeout(failTimer);
-                if (onApiReady && typeof onApiReady === 'function') {
-                    onApiReady(apiRef.current);
+            const createApi = () => {
+                // Reuse existing API instance for this room if available
+                const pooled = jitsiInstancePool.get(roomName);
+                if (pooled && pooled.api) {
+                    try {
+                        apiRef.current = pooled.api;
+                        const iframe = apiRef.current.getIFrame && apiRef.current.getIFrame();
+                        if (iframe) {
+                            const lot = getParkingLot();
+                            if (iframe.parentElement === lot || iframe.parentElement !== jitsiContainerRef.current) {
+                                try { jitsiContainerRef.current.appendChild(iframe); } catch (_) {}
+                            }
+                        }
+                        console.info('[Jitsi] Reusing pooled API instance', { roomName });
+                        return true;
+                    } catch (e) {
+                        // fallthrough to fresh create
+                        console.warn('[Jitsi] Failed to reuse pooled instance, creating new', e);
+                    }
                 }
+                try {
+                    console.info('[Jitsi] Creating External API instance', { roomName });
+                    apiRef.current = new window.JitsiMeetExternalAPI(effectiveDomain, options);
+                    jitsiInstancePool.set(roomName, { api: apiRef.current });
+                } catch (e) {
+                    console.error('Failed to create JitsiMeetExternalAPI:', e);
+                    showToast && showToast({ title: 'Embed blocked', message: 'The Jitsi server refused to be embedded. Check X-Frame-Options / CSP (frame-ancestors).', type: 'error' });
+                    clearTimeout(failTimer);
+                    return false;
+                }
+                return true;
             };
 
-            apiRef.current.addEventListener('iframeReady', onIframeReady);
+            if (!createApi()) return;
 
-            apiRef.current.addEventListener('videoConferenceJoined', () => {
-                clearTimeout(failTimer);
-                if (onApiReady && typeof onApiReady === 'function') {
-                    onApiReady(apiRef.current);
-                }
-            });
+            joinedRef.current = false;
+            retriedRef.current = false;
 
-            apiRef.current.addEventListener('videoConferenceLeft', () => {
-                if (onMeetingEnd && typeof onMeetingEnd === 'function') {
-                    onMeetingEnd();
-                }
-            });
+            const wireListeners = () => {
+                if (!apiRef.current) return;
+                // Ensure we signal readiness exactly once, even if multiple events fire
+                let readySignalled = false;
+                const signalReady = () => {
+                    if (readySignalled) return;
+                    readySignalled = true;
+                    clearTimeout(failTimer);
+                    if (onApiReady && typeof onApiReady === 'function') {
+                        onApiReady(apiRef.current);
+                    }
+                };
 
-            apiRef.current.addEventListener('recordingStatusChanged', (status) => {
-                if (onRecordingStatusChanged && typeof onRecordingStatusChanged === 'function') {
-                    onRecordingStatusChanged(status);
+                // Call immediately after successful API creation so the app can remove loaders
+                signalReady();
+
+                // Also listen to events in case immediate signal is too early in some environments
+                apiRef.current.addEventListener('iframeReady', () => {
+                    console.info('[Jitsi] iframeReady');
+                    signalReady();
+                });
+
+                apiRef.current.addEventListener('videoConferenceJoined', () => {
+                    joinedRef.current = true;
+                    console.info('[Jitsi] videoConferenceJoined');
+                    signalReady();
+                });
+
+                apiRef.current.addEventListener('videoConferenceLeft', () => {
+                    if (onMeetingEnd && typeof onMeetingEnd === 'function') {
+                        onMeetingEnd();
+                    }
+                });
+
+                apiRef.current.addEventListener('recordingStatusChanged', (status) => {
+                    if (onRecordingStatusChanged && typeof onRecordingStatusChanged === 'function') {
+                        onRecordingStatusChanged(status);
+                    }
+                });
+            };
+
+            // Watchdog: if we don't join within 8s, recreate once
+            const retryTimer = setTimeout(() => {
+                if (!joinedRef.current && !retriedRef.current) {
+                    retriedRef.current = true;
+                    try { apiRef.current && apiRef.current.dispose(); } catch (_) {}
+                    if (createApi()) {
+                        wireListeners();
+                    }
                 }
-            });
+            }, 8000);
+
+            wireListeners();
         };
+
+        if (needToLoadScript && script) {
+            script.onload = onReady;
+        } else {
+            onReady();
+        }
 
         return () => {
+            // Park the iframe so the API instance persists across unmounts
             if (apiRef.current) {
-                apiRef.current.dispose();
-                apiRef.current = null;
+                try {
+                    const iframe = apiRef.current.getIFrame && apiRef.current.getIFrame();
+                    if (iframe) {
+                        const lot = getParkingLot();
+                        lot.appendChild(iframe);
+                    }
+                    if (!jitsiInstancePool.has(roomName)) {
+                        jitsiInstancePool.set(roomName, { api: apiRef.current });
+                    }
+                } catch (_) {}
             }
+            apiRef.current = null;
             clearTimeout(failTimer);
-            if (document.head.contains(script)) {
-                document.head.removeChild(script);
-            }
+            // Do NOT remove the external_api.js script; keep it cached globally
         };
-    }, [
-        domain, roomName, displayName, password, onMeetingEnd, onApiReady,
-        onRecordingStatusChanged, startWithVideoMuted, startWithAudioMuted, 
-        prejoinPageEnabled, toolbarButtons, noiseSuppressionEnabled, jwt, showToast 
-    ]);
+    }, [domain, roomName]);
+
+    // Update mutable props without remounting the iframe
+    useEffect(() => {
+        if (!apiRef.current) return;
+        try { apiRef.current.executeCommand('displayName', displayName); } catch (_) {}
+    }, [displayName]);
 
     return (
         <div

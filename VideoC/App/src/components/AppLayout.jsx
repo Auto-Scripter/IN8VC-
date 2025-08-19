@@ -34,9 +34,9 @@ export default function AppLayout() {
     gsap.fromTo(el, { opacity: 0, y: 10, scale: 0.995 }, { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'power2.out' });
   }, [location.pathname]);
 
-  // Hide sidebar ONLY when on an active meeting route like /meeting/<id>
+  // Hide sidebar on active meeting routes like /meeting/<id> and guest pre-join /guest/<id>
   // Keep it visible for /meeting (dashboard)
-  const hideSidebar = /^\/meeting\/[^\/]+/.test(location.pathname);
+  const hideSidebar = /^\/meeting\/[^\/]+/.test(location.pathname) || /^\/guest\/[^\/]+/.test(location.pathname);
   const isAdminUsers = location.pathname.startsWith('/admin/users');
 
   return (

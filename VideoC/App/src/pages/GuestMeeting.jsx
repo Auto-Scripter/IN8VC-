@@ -22,7 +22,7 @@ export default function GuestMeeting() {
     localStorage.setItem('guestJoinAudio', String(micOn));
     localStorage.setItem('guestJoinVideo', String(camOn));
     localStorage.setItem('joinAsGuest', 'true');
-    navigate(`/meeting/${meetingId}`);
+    navigate(`/meeting/${meetingId}`, { state: { guest: true } });
   };
 
   // UI Component for the toggle buttons (updated to use correct icon names)

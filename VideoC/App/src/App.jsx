@@ -43,7 +43,7 @@ const App = () => {
           {/* Guest accessible meeting route (no auth) */}
           <Route path="/guest/:meetingId" element={<GuestMeeting />} />
 
-          {/* Auth-protected meeting route */}
+          {/* Meeting route protected by guest-aware guard. Guests are redirected to /guest/:id to enter name. */}
           <Route
             path="/meeting/:meetingId"
             element={
