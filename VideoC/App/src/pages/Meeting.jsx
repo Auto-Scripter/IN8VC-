@@ -895,13 +895,35 @@ useEffect(() => {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'meeting_actions', filter: `meeting_id=eq.${activeMeeting.id}` }, async ({ new: action }) => {
                 if (!action || action.type !== 'end-meeting') return;
                 try { jitsiApi.executeCommand('hangup'); } catch (_) {}
-                // Also dispose just in case
-                try { jitsiApi.dispose(); } catch (_) {}
+                setActiveMeeting(null);
+                setJitsiApi(null);
                 navigate('/meeting');
             })
             .subscribe();
         return () => { supabase.removeChannel(chanAll); };
     }, [activeMeeting?.id, jitsiApi, navigate]);
+
+    // Jitsi-side fallback: when conference closes or user is kicked, leave page
+    useEffect(() => {
+        if (!jitsiApi || !activeMeeting?.id) return;
+        const leaveNow = () => {
+            try { jitsiApi.executeCommand('hangup'); } catch (_) {}
+            setActiveMeeting(null);
+            setJitsiApi(null);
+            navigate('/meeting');
+        };
+        const onReadyToClose = () => leaveNow();
+        const onLeft = () => leaveNow();
+        const onKicked = () => leaveNow();
+        try { jitsiApi.addEventListener('readyToClose', onReadyToClose); } catch (_) {}
+        try { jitsiApi.addEventListener('videoConferenceLeft', onLeft); } catch (_) {}
+        try { jitsiApi.addEventListener('participantKickedOut', onKicked); } catch (_) {}
+        return () => {
+            try { jitsiApi.removeEventListener('readyToClose', onReadyToClose); } catch (_) {}
+            try { jitsiApi.removeEventListener('videoConferenceLeft', onLeft); } catch (_) {}
+            try { jitsiApi.removeEventListener('participantKickedOut', onKicked); } catch (_) {}
+        };
+    }, [jitsiApi, activeMeeting?.id, navigate]);
 
 
    const handleCreateMeeting = async (formData, scheduleOption = 'now') => {

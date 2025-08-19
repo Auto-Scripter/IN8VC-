@@ -367,7 +367,9 @@ const CustomControls = ({ jitsiApi, onHangup, areControlsVisible, pauseTimer, re
                                                         }
                                                     }
                                                 } catch (_) {}
+                                                // Also leave locally and route back via parent handler
                                                 try { jitsiApi.executeCommand('hangup'); } catch (_) {}
+                                                onHangup && onHangup();
                                                 showToast && showToast({ title: 'Meeting ended', message: 'Ended for all participants.', type: 'success' });
                                             } else {
                                                 // Non-host admin: request host to end
